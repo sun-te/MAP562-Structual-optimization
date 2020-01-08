@@ -6,18 +6,12 @@ The main formulation of the problem is based on variational methods, finit eleme
 
 The code is mainly composed by [FreeFem++](https://freefem.org/), a A high level multiphysics finite element software developped by French team inlcuding INRIA, Polytechnique..
 
-We have studied cases like minimizing mechanical compliance:
+We have studied cases like minimizing mechanical compliance. As well as some heat diffusion optimization like "disque" and "house" shape heat:
 
 <div>
     <img align='left' src="img/deformed.png", width="300">
     <img align='right' src="img/original.png", width="200">
 </div>
-
-
---------------------
-
-Or some heat diffusion optimization like "disque" and "house" shape heat:
-
 
 <div>
     <img align='left' src="img/diffuse.png", width="300">
