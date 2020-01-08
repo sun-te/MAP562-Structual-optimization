@@ -10,14 +10,17 @@ We have studied cases like minimizing mechanical compliance:
 
 <div>
     <img align='left' src="img/deformed.png", width="300">
-    <img align='right' src="img/orignal.png", width="300">
+    <img align='right' src="img/original.png", width="300">
 </div>
 
-Or sine heat diffusion optimization:
+Or some heat diffusion optimization like "disque" and "house" shape heat:
+
+
 <div>
     <img align='left' src="img/diffuse.png", width="300">
     <img align='right' src="img/diffuse2.png", width="300">
 </div>
+
 <div>
     <img align='center' src="img/home.png", width="300">
 </div>
