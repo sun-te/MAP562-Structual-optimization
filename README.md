@@ -10,9 +10,9 @@ We have studied cases like minimizing mechanical compliance:
 
 <div>
     <img align='left' src="img/deformed.png", width="300">
-    <img align='right' src="img/original.png", width="300">
+    <img align='right' src="img/original.png", width="200">
 </div>
-<br><br><br><br><br><br>
+
 
 --------------------
 
