@@ -12,6 +12,9 @@ We have studied cases like minimizing mechanical compliance:
     <img align='left' src="img/deformed.png", width="300">
     <img align='right' src="img/original.png", width="300">
 </div>
+<br><br><br><br><br><br>
+
+--------------------
 
 Or some heat diffusion optimization like "disque" and "house" shape heat:
 
