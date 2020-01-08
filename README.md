@@ -6,3 +6,18 @@ The main formulation of the problem is based on variational methods, finit eleme
 
 The code is mainly composed by [FreeFem++](https://freefem.org/), a A high level multiphysics finite element software developped by French team inlcuding INRIA, Polytechnique..
 
+We have studied cases like minimizing mechanical compliance:
+
+<div>
+    <img align='left' src="img/deformed.png", width="300">
+    <img align='right' src="img/orignal.png", width="300">
+</div>
+
+Or sine heat diffusion optimization:
+<div>
+    <img align='left' src="img/diffuse.png", width="300">
+    <img align='right' src="img/diffuse2.png", width="300">
+</div>
+<div>
+    <img align='center' src="img/home.png", width="300">
+</div>
