@@ -1,0 +1,17 @@
+-- FreeFem++ v4.400001 (lun.  2 sept. 2019 15:27:46 - git v4.4-1-14-gab6f1dfe)
+ Load: lg_fem lg_mesh lg_mesh3 eigenvalue
+    1 : /////////////////////////////////////
+    2 : // Material parameters, "two-phases"
+    3 : // The two parameters are scalar,
+    4 : // thus the two phases are isotropic.
+    5 : load "lapack"(load: loadLibary C:\Program Files (x86)\FreeFem++\\.\lapack = 0) Add lapack interface ...
+    6 : load "fflapack"(load: loadLibary C:\Program Files (x86)\FreeFem++\\.\fflapack = 0)( load: lapack <=> fflapack ,
+skeep )  This  is an obsolete plugin fflacpack please use  the  plugin lapack
+ This plugin will be removed in 2020
+  current line = 6
+Assertion fail : (0)
+        line :1387, in file fflapack.cpp
+error Assertion fail : (0)
+        line :1387, in file fflapack.cpp
+ code = 6 mpirank: 0
+ try getConsole D:\Ecole Polytechnique\2019-P2\Etude\MAP562\PC8MAP562\home1.edp

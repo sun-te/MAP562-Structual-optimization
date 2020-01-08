@@ -1,0 +1,90 @@
+// MAP 562 (G. Allaire, B. Bogosel)
+// Jan 16, 2019
+//
+// TD 2
+// Exercise 2
+
+// Example of a
+//*******fixed point algorithm*******
+//to linearize a non linear problem and solve it mutiple times
+//******************************************************
+// to solve - u^3=f?
+//   u_{n-1}^2((1-\alpha) u_n + \alpha u_{n_1})
+//******************************************************
+// in order to solve the non-linear problem u^3=f
+
+int N=50;	// Nb of edges on the boundary
+
+// Define the tolerance at which we want to stop
+// the calculation
+real lowertolerance =1.e-4;
+real eps = 1e-6;
+//如果alpha太大了那么就不存在concentration，不存在fixed point，oscillation
+real alpha = -1; // parameter in the fixed point equation
+
+// Define the polynomial degree
+macro vh() P1 //
+
+// Define the mesh and boundaries
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+fespace Vh(Th,vh);
+
+// The solution u^{k} is denoted by u
+Vh du,f,u,uold,phi;
+
+f = x^2+1;
+//f=sqrt((x-0.5)^2+(y-0.5)^2)-0.2;
+
+// Initialize the initial guess u^0 as zero
+u = 1;
+uold = u;
+
+// Implement the functional given in the exercise
+// In variational form u^3-f becomes
+// int2d(Th)(u^3*phi) - int2d(Th)(f*phi) = 0 for every phi
+//
+// FreeFem can only solve linear problems so we need to linearize the
+// problem and solve it multiple times, updating the coefficients
+
+problem fixedp(u,phi)=
+    int2d(Th)((1-alpha)*(uold+eps)^2*u*phi)
+   +int2d(Th)(alpha*uold^3*phi)
+   -int2d(Th)(f*phi);
+
+Vh error;
+
+// Solution loop
+real err = 1e10;
+
+// Counter of the number of gradient steps
+int i=0;
+
+// Final loop
+while(err > lowertolerance)
+{
+	// Compute new iterate u^{k+1}
+        //fixedp;
+
+        // or via direct identification
+        u = (-alpha*uold^3+f)/((1-alpha)*(uold^2+eps));
+
+        // compute difference between consecutive iterates
+
+        error = abs(u-uold);
+        uold = u;
+        err = error[].linfty;
+
+	// Output on the terminal and visualization
+	cout<<"#"<<i<<" Error:  " << error[].linfty << endl;
+	plot(u,cmm="#"+i,wait=0,fill=1);
+
+	// Increment counter
+	i++;
+}

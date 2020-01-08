@@ -1,0 +1,191 @@
+// G. Allaire, B. Bogosel
+// MAP562, January 2019
+
+// Parametric optimization of the conductivity
+// Conductivity equation with target temperature on certain parts of the boundary
+
+int niter=100;			// Number of iteration
+int n;				// Mesh size
+real pas=0.1 ;			// Stepsize
+int inddico ;
+real objectif;			// Objective function
+real objectifold ;
+real volume0;			// Initial volume
+real volume;
+string legende;			// L�gende pour les sorties graphiques
+
+real TOL = 1e-5;
+
+verbosity = 0;
+
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+
+
+
+// Maximum and minimal width of the plate//
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.6;  // initialization with a constant function
+func h0=hmoy;
+
+
+// Construct the mesh //
+n = 20 ; // number of points on boundary
+int[int] labels = [2,2,2,1];
+mesh Th= square(2*n,n,[-1+2*x,y],label=labels,flags=1);
+plot(Th,wait=1);
+
+fespace Vh0(Th,P0);//Definition of the P0 space
+fespace Vh(Th,P2);
+
+Vh u,w,p,uold;
+
+Vh0 h,hold;
+Vh0 gradient;
+
+h = h0 ;
+
+
+// Parameters //
+real u0=0.; // Target temperature
+func f = 1;  // Source term
+func g = 0;
+
+// Macros
+
+macro grad(u) [dx(u),dy(u)]//
+// Define the PDE //
+problem heat(u,w) =
+    int2d(Th)(h*grad(u)'*grad(w))
+   -int2d(Th)(f*w)
+    +on(1,u=0)
+;
+
+// Define the adjoint state //
+problem adjoint(p,w) =
+    int2d(Th)(h*grad(p)'*grad(w))
+   +int1d(Th,2)( 2*(u-u0)*w )
+   +on(1,p=0)
+;
+
+// Compute initial volume //
+volume0=int2d(Th)(h);
+
+
+// Initial objective function //
+heat;
+objectif=int1d(Th,2)((u-u0)^2);
+
+cout<<"Initialization. Objective: "<<objectif<<" Volume: "<<volume0<<endl;
+
+
+// Adjoint and initial gradient  //
+
+adjoint ;
+
+gradient = grad(u)'*grad(p);
+
+
+real norgrad=int2d(Th)(gradient*gradient);
+norgrad=sqrt(norgrad) ;
+cout << "Gradient: " << norgrad   << endl ;
+pas=pas/norgrad ;
+cout << "First step "<< pas << endl;
+
+int iter;
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+macro proj(u,u0,Vh) {
+   u  = trunc(u,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   real tmin = hmin-u[].max,tmax = hmax-u[].min;
+   while(tmax-tmin>TOL||abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro
+
+real[int] vals(niter);
+
+// Optimization loop
+for (iter=1;iter<=niter;iter=iter+1)
+{
+cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+hold = h ;
+objectifold = objectif ;
+uold = u ;
+
+h = hold - pas*gradient;
+
+proj(h,volume0/Th.area,Vh0);
+
+// Solve the conductivity equation
+heat;
+
+//Compute the objective function
+objectif=int1d(Th,2)((u-u0)^2);
+vals[iter-1] = objectif;
+
+if (objectif > objectifold*1.00001 )
+{
+// if we do not descent we refuse the step
+  pas = pas / 2. ;
+  cout << "Reject: new step=" << pas << endl ;
+  h=hold ;
+  u = uold;
+  objectif = objectifold ;
+}
+else
+{
+// on accepte le pas
+  pas = pas * 1.1 ;
+  cout << "New step=" << pas << endl ;
+
+  // Compute the gradient using the adjoint method //
+  adjoint ;
+  gradient = grad(u)'*grad(p);
+};
+
+
+// End of loop. Show the result  //
+
+volume = int2d(Th)(h);
+
+cout << "Objectif: " << objectif   << endl ;
+cout<<"Cout: "<<objectif<<" Volume: "<<volume<<endl;
+legende="Iteration "+iter+", Cout "+objectif+", Volume="+volume;
+plot(Th,h,fill=1,value=0,viso=vviso,cmm=legende,wait=0);
+
+cout << volume << " " << volume0 << endl;
+
+};
+
+//Show the final shape
+legende="Forme finale, Iteration "+iter+", Cout "+objectif+", Volume="+volume;
+plot(Th,h,fill=1,value=0,viso=vviso,cmm=legende);
+
+// Show convergence curve
+real[int] dis = 1:niter;
+plot([dis,vals],cmm="Evolution of the objective function");
+
+// If the plot is not shown correctly in the window type + to fix the view
+// With P and Enter you can go to previous and next plots

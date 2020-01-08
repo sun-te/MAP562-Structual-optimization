@@ -1,0 +1,172 @@
+// G. Allaire, B. Bogosel 2019
+// MAP562
+// Script containing the variational formulation of the elasticity
+// for the membrane case with coefficients depending on the thickness
+
+// You may start from this script to solve the Homework problems
+
+// Use ideas from the scripts presented in class, notably:
+
+// Preliminary: write the Lagrangian and find its partial derivatives
+// 1. Define the problem for the adjoint state
+// 2. Write the correct formula for the gradient (by direct identification in this case)
+// 3. Take the projection algorithm on the constraint from the
+//    codes shown in class
+//
+
+
+int niter=30;			// Number of iterations
+int n=2;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume constraint
+real lagmin, lagmax ;		// Bounds for the Lagrange multiplier
+int inddico ;
+real compliance;		// Compliance
+real volume0;			// Initial volume
+real volume,volume1;		// Volume of the current shape
+real exa=1;			// Coefficient for the shape deformation
+string caption;			// Caption for the graphics
+real E=100;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+func g1=0;  			// Applied forces
+func g2=-100;
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+//////////////////////////////////////
+// Computation of Lame coefficients //
+//////////////////////////////////////
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+////////////////////////////////////////////////////
+// Lower and upper bounds for the plate thickness //
+////////////////////////////////////////////////////
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.5;
+func h0=hmoy ;
+
+/////////////////////// 			1:Dirichlet boundary condition
+// Domain definition // 			2:Neumann boundary or free boundary condition
+/////////////////////// 			3:Non-homogeneous Neumann or applied load
+mesh Th, Dh;
+
+border bd(t=0,1)       { x=+1; y=t;label=2; };   // right boundary of the domain
+border bg(t=1,0)       { x=-1; y=t;label=2; };   // left boundary of the domain
+border bs(t=1,-1)      { x=t;  y=1;label=2; };   // upper boundary of the domain
+border b1(t=-1,-0.9)   { x=t;  y=0;label=1; };   // lower boundary of the domain
+border b2(t=-0.9,-0.1) { x=t;  y=0;label=2; };
+border b3(t=-0.1,0.1)  { x=t;  y=0;label=3; };
+border b4(t=0.1,0.9)   { x=t;  y=0;label=2; };
+border b5(t=0.9,1)     { x=t;  y=0;label=1; };
+
+///////////////////////
+// Building the mesh //
+///////////////////////
+n = 2 ;
+int m = 3 ;
+Th= buildmesh (bd(10*n)+bs(20*n)+bg(10*n)+b1(m)+b2(8*n)+b3(2*m)+b4(8*n)+b5(m));
+plot(Th,wait=0);
+
+/////////////////////////////////////////////
+// Definition of the finite element spaces //
+/////////////////////////////////////////////
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s];
+Vh0 h,hold,density;
+
+h = h0 ;
+///////////////////////
+// Elasticity system //
+//////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+
+//!!!!!
+// The symmetry condition in elasticity!
+//
+// in order to impose a symmetry condition for the elasticity equation
+// work on half the domain and impose that the displacement
+// orthogonal to the symmetry axis is zero (as a Dirichlet boundary condition)
+
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+              +h*lambda*div(u,v)*div(w,s))// bilinear part
+    -int1d(Th,3)(g1*w+g2*s)	          // forces; for bulk forces, add a volumic term
+    +on(1,u=0)
+    +on(1,v=0)                        // Dirichlet boundary conditions
+;
+
+
+
+
+
+////////////////////
+// Initial volume //
+////////////////////
+volume0=int2d(Th)(h);
+
+////////////////////////
+// Initial compliance //
+////////////////////////
+elasticity;
+compliance=int1d(Th,3)(g1*u+g2*v);
+cout<<"Initialization. Compliance: "<<compliance<<" Volume: "<<volume0<<endl;
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+real coef = 0.2 ;
+plot(h,fill=1,wait=1,cmm="Plot the density h");
+Dh = movemesh (Th,[x+coef*u,y+coef*v]);
+plot(Dh,wait=1,cmm="Plot of the deformed mesh");
+
+////////////////////////////////
+//     Optimisation loop      //
+////////////////////////////////
+
+int iter;
+
+for (iter=1;iter< niter;iter=iter+1)
+{
+cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+
+
+//HOMEWORK:
+//Write the Optimization loop
+//We have left some lines of code for printing and plotting data througout the iterations that you may find useful
+
+
+//Computation of the compliance
+compliance=int1d(Th,3)(g1*u+g2*v);
+cout<<"Compliance: "<<compliance<<" Volume: "<<volume<<" Lagrange: "<<lagrange<<endl;
+
+//////////////////////////////////////////////
+// Plot the thickness of the current design //
+//////////////////////////////////////////////
+
+caption="Iteration "+iter+", Compliance "+compliance+", Volume="+volume;
+plot(Th,h,fill=1,value=true,viso=vviso,cmm=caption,wait=0);
+
+/////////////////////
+// End of the loop //
+/////////////////////
+};
+
+//Plot the final design
+caption="Final design, Iteration "+iter+", Compliance "+compliance+", Volume="+volume;
+plot(Th,h,fill=1,value=1,viso=vviso,cmm=caption);
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+Dh = movemesh (Th,[x+coef*u,y+coef*v]);
+plot(Dh,wait=0);

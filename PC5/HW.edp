@@ -1,0 +1,88 @@
+
+
+
+int niter=30;			// Number of iterations
+int n=2;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume constraint
+real lagmin, lagmax ;		// Bounds for the Lagrange multiplier
+int inddico ;
+real compliance;		// Compliance
+real volume0;			// Initial volume
+real volume,volume1;		// Volume of the current shape
+real exa=1;			// Coefficient for the shape deformation
+string caption;			// Caption for the graphics
+real E=100;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+//////////////////////////////////////
+// Computation of Lame coefficients //
+//////////////////////////////////////
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+real R=2,r=1;
+int GammaD=1,GammaN=2;
+int Nc = 5;
+border C1(t=0,2*pi){
+   x = R*cos(t);
+   y = R*sin(t);
+   label = GammaN;
+}
+
+border C2(t=0,2*pi){
+   x = r*cos(t);
+   y = r*sin(t);
+   label = GammaD;
+}
+mesh Th = buildmesh(C1(2*pi*R*Nc)+C2(-2*pi*r*Nc));
+plot(Th,wait=1,cmm="Mesh of a ring");
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s];
+Vh0 h,hold,density;
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.5;
+func h0=hmoy ;
+h=h0;
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+              +h*lambda*div(u,v)*div(w,s))// bilinear part
+    -int1d(Th,GammaN)(-N.y*w+N.x*s)	          // forces; for bulk forces, add a volumic term
+    +on(GammaD,u=0,v=0)                       // Dirichlet boundary conditions
+;
+elasticity;
+plot([u,v],wait=0);
+
+compliance=int1d(Th,GammaN)(-N.y*u+N.x*v);
+
+
+macro proj(h,h0,sigma,Vh) {
+   h  = trunc(h,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   real lmin = hmin-u[].max,lmax = hmax-u[].min;
+   while(tmax-tmin>TOL||abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro

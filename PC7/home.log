@@ -1,0 +1,1030 @@
+-- FreeFem++ v4.400001 (lun.  2 sept. 2019 15:27:46 - git v4.4-1-14-gab6f1dfe)
+ Load: lg_fem lg_mesh lg_mesh3 eigenvalue
+    1 : /* Geometric optimization of the shape of a cantilever */
+    2 : load "medit"(load: loadLibary C:\Program Files (x86)\FreeFem++\\.\medit = 0)
+    3 :
+    4 : verbosity = 0;
+    5 :
+    6 : int Gamma=0,GammaD=1;
+    7 :
+    8 : /* Border of the initial domain */
+    9 : border left1(t=0.0,1.0){x = 0.0; y = 1.0-t; label = GammaD;};
+   10 : border left2(t=0.0,1.0){x = 1.0-t; y = 2.0-t; label = GammaD;};
+   11 : border bottom(t=0.0,2.0){x=t; y=0.0; label=GammaD;};
+   12 : border right1(t=0.0,1){x = 2.0; y = t; label = GammaD;};
+   13 : border right2(t=0.0,1){x = 2.0-t; y = 1.0+t; label = GammaD;};
+   14 : border h1 (t=0.0,2.0*pi){x=0.7+0.2*cos(t); y=0.5+0.2*sin(t); label=Gamma;};
+   15 : border h2 (t=0.0,2.0*pi){x=1.3+0.5*cos(t); y=0.4+0.3*sin(t); label=Gamma;};
+   16 : /* Create, then display initial mesh */
+   17 : int m=10;
+   18 : mesh Th = buildmesh( left1(m) + left2(m*sqrt(2))
+   19 :           + bottom(2*m) + right1(m) + right2(m*sqrt(2))
+   20 :           //+h1(-m*0.6*pi)
+   21 :           +h2(-m*0.6*pi));
+   22 : //plot(Th,wait=0);
+   23 :
+   24 : /* Parameters */
+   25 : real eps = 1.e-6;
+   26 : real gx = 0.0;
+   27 : real gy = -1.0;
+   28 : real cply = 0.0;
+   29 : real obj = 0.0,newobj = 0.0;
+   30 : mesh Dh;
+   31 : int nit = 300;
+   32 :
+   33 : real gmax;
+   34 : real coef = 0.1;
+   35 : real coefmax = 0.2;
+   36 : real coefmin = 0.001;
+   37 : real step;
+   38 : real chkvoltri;
+   39 : real epsvoltri = 1.e-6;
+   40 : real tol = 0.001;
+   41 : real tgv = 1.e10;
+ *** Warning  The identifier tgv hide a Global identifier
+ 
+   42 : real vol = 0.0;
+   43 : real ell = 5.0;
+   44 : real muel = 0.3846;
+   45 : real lambdael = 0.5769;
+   46 : string s;
+   47 :
+   48 : real u1=0;
+   49 : real u2=1;
+   50 : real T1=100;
+   51 : real T0=20;
+   52 :
+   53 :
+   54 : // /* Finite element spaces: P1 elements for the resolution of the linearized elasticity system */
+   55 : fespace Vh(Th,P1);
+   56 : fespace Vh0(Th,P0);
+   57 :
+   58 : // /* Functions */
+   59 : Vh   ux,uy,vx,vy,grx,gry,ng,uox,uoy,chidir;
+   60 : Vh0  gr0;
+   61 :
+   62 : Vh T,Q,Phi,Psi,Told,Qold;
+   63 :
+   64 :
+   65 : Vh0 hMax = hTriangle; // get sizes of all triangles
+   66 : real meshsiz = hMax[].max; // get maximal triangle size
+   67 : real alpha = (2.0*meshsiz)^2; //regularization parameter
+   68 : macro grad2(ux,uy) [dx(ux),dy(ux),dx(uy),dy(uy)] )   [dx(ux),dy(ux),dx(uy),dy(uy)]//
+   69 : macro div(ux,uy) (dx(ux)+dy(uy)) )   (dx(ux)+dy(uy))//
+   70 : macro grad(u) [dx(u),dy(u)] )   [dx(u),dy(u)]//
+   71 :
+   72 :
+   73 : /* Linearized elasticity system */
+   74 : problem temp(T,Phi)=
+   75 :   int2d(Th)( grad(T)  [dx(T),dy(T)]'*grad(Phi)  [dx(Phi),dy(Phi)]  +[u1,u2]'*grad(T)  [dx(T),dy(T)]*Phi )
+   76 :   -int1d(Th,Gamma)(grad(T)  [dx(T),dy(T)]'*[N.x,N.y]*Phi)
+   77 : //  -int1d(Th,GammaD)(grad(T)'*[N.x,N.y]*Phi)
+   78 :   +on(GammaD,T=0)
+   79 :   +on(Gamma, T=T1);
+   80 : //temp;
+   81 : //plot(T,wait=1);
+   82 :
+   83 :
+   84 : problem adjoint(Q,Psi)=
+   85 :   int2d(Th)(2*(T-T0)*Psi )
+   86 :   -int2d(Th)([u1,u2]'*grad(Q)  [dx(Q),dy(Q)]*Psi)
+   87 :   +int2d(Th)(grad(Psi)  [dx(Psi),dy(Psi)]'*grad(Q)  [dx(Q),dy(Q)])
+   88 :   +on(GammaD,Gamma,Q=0);
+   89 : //adjoint;
+   90 : //plot(Q,wait=1);
+   91 :
+   92 : /* Localization function for nodes to be frozen */
+   93 : func real locdir() {
+   94 :   if ( y<=0.01  || x>=1.99 || x<=0.01) return(0);
+   95 :   else return(0.0);
+   96 : }
+   97 : chidir = locdir();
+   98 : //
+   99 : // /* Tangential derivative */
+  100 : //macro Dt(u) [dx(u)-(dx(u)*N.x+dy(u)*N.y)*N.x,dy(u)-(dx(u)*N.x+dy(u)*N.y)*N.y] // EOM
+  101 : //
+  102 : // /* Extension / regularization problem */
+  103 : // problem velext([grx,gry],[vx,vy],solver=Crout) =
+  104 : //   int2d(Th)(mu*(2.0*dx(grx)*dx(vx) + (dx(gry)+dy(grx))*(dx(vy)+dy(vx)) + 2.0*dy(gry)*dy(vy))
+  105 : //                 + lambda*(dx(grx)+dy(gry))*(dx(vx)+dy(vy)) + (1.0+chidir*tgv)*(grx*vx+gry*vy) )
+  106 : //   + int1d(Th,Gamma)( alpha*(Dt(grx)'*Dt(vx) + Dt(gry)'*Dt(vy)) )
+  107 : //   - int1d(Th,Gamma)( gr0*(N.x*vx+N.y*vy) )
+  108 : //   + on(GammaD,GammaN,grx=0.0,gry=0.0);
+  109 :
+  110 : // problem velext2([grx,gry],[vx,vy]) =
+  111 : //    int2d(Th)(grad2(grx,gry)'*grad2(vx,vy))//+  (1.0+chidir*tgv)*(grx*vx+gry*vy) )
+  112 : //    +int1d(Th,Gamma)(gr0*(N.x*vx+N.y*vy) )
+  113 : //    +on(GammaD,grx=0.0,gry=0.0);
+  114 :
+  115 : problem velext2([grx,gry],[vx,vy]) =
+  116 :  //regularization, to avoid an external hole
+  117 :  //if we delete this term, the mesh will move creazily
+  118 :  int2d(Th)(grad2(grx,gry)  [dx(grx),dy(grx),dx(gry),dy(gry)]'*grad2(vx,vy)  [dx(vx),dy(vx),dx(vy),dy(vy)] + (grxÉ*vx+gry*vy) )
+  119 :  - int1d(Th,Gamma)( gr0*(N.x*vx+N.y*vy) )
+  120 :  + on(GammaD,grx=0.0,gry=0.0);
+  121 : //  + int1d(Th,omega)( alpha*(Dt(grx)'*Dt(vx) + Dt(gry)'*Dt(vy)) )
+  122 : //
+  123 :
+  124 :
+  125 : // /* Objective function */
+  126 : macro J() ( int2d(Th)((T-T0)^2))  ( int2d(Th)((T-T0)^2)) // EOM
+  127 :
+  128 :
+  129 : /* (Negative) shape gradient of J */
+  130 : macro dJ() {
+  131 #   gr0=  -((T-T0)^2 -grad(T)'*[N.x,N.y]*grad(Q)'*[N.x,N.y] ) -ell;
+  132 #   velext2;
+  133 # }  {
+  134 :   gr0=  -((T-T0)^2 -grad(T)'*[N.x,N.y]*grad(Q)'*[N.x,N.y] ) -ell;
+  135 :   velext2;
+  136 : } // EOM
+  137 :
+  138 : /* Initialization */
+  139 : temp;
+  140 : adjoint;
+  141 : /* Initial value of the objective function */
+  142 : // 3-vol = Volume of Omega
+  143 : vol     = Th.area;
+  144 : obj     = J    ( int2d(Th)((T-T0)^2))  + ell*(3-vol);
+  145 : real[int] vals(nit);
+  146 : vals[0]=obj;
+  147 :
+  148 : /* Main optimization loop */
+  149 : for(int n=1; n<nit; n++){
+  150 :
+  151 :   /* Computation of the shape gradient as a P1 function and size of the time step */
+  152 :   dJ
+  131 :
+  132 :
+  133 :   {
+  131 :   gr0=  -((T-T0)^2 -grad(T)  [dx(T),dy(T)]'*[N.x,N.y]*grad(Q)  [dx(Q),dy(Q)]'*[N.x,N.y] ) -ell;
+  132 :   velext2;
+  133 : } ;
+  153 :   ng = sqrt(grx*grx+gry*gry);
+  154 :   gmax = ng[].max;
+  155 :   step = coef*meshsiz / (eps^2+gmax);
+  156 :
+  157 :   /* Attempt motion of the mesh: if the moved mesh has an almost null or flipped element, restart the operation
+Éwith a smaller step */
+  158 :   chkvoltri = checkmovemesh(Th,[x+step*grx,y+step*gry]);
+  159 :
+  160 :   if( chkvoltri < epsvoltri ) {
+  161 :     cout<<"Iteration "<<n<<" rejected; inverted triangle."<<endl;
+  162 :     coef *= 0.5;
+  163 :     continue;
+  164 :   }
+  165 :
+  166 :   /* Else, effectively move the new mesh */
+  167 :   Dh = movemesh(Th,[x+step*grx,y+step*gry]);
+  168 :
+  169 :   /* Resolution of the state equation */
+  170 :   Told = T;
+  171 :   Qold = Q;
+  172 :   temp;
+  173 :   adjoint;
+  174 :
+  175 :   /* Evaluation of the new objective function */
+  176 :   vol    = Th.area;
+  177 :   newobj = J    ( int2d(Th)((T-T0)^2))  +ell*(3-vol);
+  178 :
+  179 :   /* Decision */
+  180 :   if( newobj < obj+tol*abs(obj) || coef <= coefmin ) {
+  181 :     cout<<"Iteration "<<n<<" accepted; objective: "<<obj<<" ---> "<<newobj<<endl;
+  182 :     cout<<"Volume: " << vol << endl;
+  183 :     obj   = newobj;
+  184 :     coef  = min(coefmax,1.02*coef);
+  185 :     //coef  = min(coefmax,1.5*coef);
+  186 :     Th    = Dh;
+  187 :     /* Adapt the mesh to the current solution of the elasticity system */
+  188 :     Th = adaptmesh(Th,T,hmin=0.05,hmax=0.1);
+  189 :
+  190 :     hMax = hTriangle; // get sizes of all triangles
+  191 :     meshsiz = hMax[].max; // get maximal triangle size
+  192 :     cout << meshsiz << endl;
+  193 :     //alpha = (2.0*meshsiz)^2;
+  194 :     //chidir = locdir();
+  195 :     plot(Th,wait=0);
+  196 :   }
+  197 :   else {
+  198 :     cout<<"Iteration "<<n<<" rejected; objective: "<<obj<<" v.s. "<<newobj<<endl;
+  199 :     coef  = max(coefmin,0.9*coef);
+  200 :     T    = Told;
+  201 :     Q    = Qold;
+  202 :   }
+  203 :   vals[n] =obj;
+  204 : }
+  205 : real[int] dis = 1:vals.n;
+  206 : plot([dis,vals],wait=1,cmm="Evoluion of cost function");
+  207 : // /* Print mesh and solution */
+  208 : // //savemesh(Th,"Cantilever.mesh");
+  209 : // //savesol("Cantilever.sol",Th,[ux,uy]);
+  210 :  sizestack + 1024 =6096  ( 5072 )
+ 
+Iteration 1 accepted; objective: 2247.41 ---> 2247.41
+Volume: 2.53829
+0.142517
+Iteration 2 accepted; objective: 2247.41 ---> 2212.82
+Volume: 2.50995
+0.136146
+Iteration 3 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 4 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 5 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 6 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 7 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 8 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 9 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 10 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 11 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 12 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 13 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 14 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 15 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 16 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 17 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 18 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 19 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 20 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 21 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 22 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 23 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 24 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 25 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 26 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 27 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 28 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 29 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 30 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 31 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 32 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 33 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 34 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 35 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 36 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 37 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 38 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 39 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 40 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 41 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 42 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 43 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 44 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 45 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 46 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 47 rejected; objective: 2212.82 v.s. 2222.69
+Iteration 48 accepted; objective: 2212.82 ---> 2222.69
+Volume: 2.48899
+0.136218
+Iteration 49 accepted; objective: 2222.69 ---> 2222.82
+Volume: 2.48879
+0.126016
+Iteration 50 accepted; objective: 2222.82 ---> 2222.9
+Volume: 2.48859
+0.125875
+Iteration 51 accepted; objective: 2222.9 ---> 2222.98
+Volume: 2.4884
+0.125491
+Iteration 52 accepted; objective: 2222.98 ---> 2223.08
+Volume: 2.4882
+0.125045
+Iteration 53 accepted; objective: 2223.08 ---> 2223.2
+Volume: 2.488
+0.124477
+Iteration 54 accepted; objective: 2223.2 ---> 2223.32
+Volume: 2.4878
+0.123835
+Iteration 55 accepted; objective: 2223.32 ---> 2223.42
+Volume: 2.4876
+0.123336
+Iteration 56 accepted; objective: 2223.42 ---> 2223.52
+Volume: 2.48739
+0.122716
+Iteration 57 accepted; objective: 2223.52 ---> 2223.59
+Volume: 2.48718
+0.122594
+Iteration 58 accepted; objective: 2223.59 ---> 2223.7
+Volume: 2.48696
+0.122273
+Iteration 59 accepted; objective: 2223.7 ---> 2223.81
+Volume: 2.48675
+0.122018
+Iteration 60 accepted; objective: 2223.81 ---> 2223.89
+Volume: 2.48652
+0.121776
+Iteration 61 accepted; objective: 2223.89 ---> 2224
+Volume: 2.4863
+0.121543
+Iteration 62 accepted; objective: 2224 ---> 2224.11
+Volume: 2.48607
+0.121372
+Iteration 63 accepted; objective: 2224.11 ---> 2224.23
+Volume: 2.48583
+0.121237
+Iteration 64 accepted; objective: 2224.23 ---> 2224.34
+Volume: 2.48559
+0.121267
+Iteration 65 accepted; objective: 2224.34 ---> 2224.46
+Volume: 2.48535
+0.121307
+Iteration 66 accepted; objective: 2224.46 ---> 2224.58
+Volume: 2.4851
+0.121331
+Iteration 67 accepted; objective: 2224.58 ---> 2224.7
+Volume: 2.48484
+0.121358
+Iteration 68 accepted; objective: 2224.7 ---> 2224.83
+Volume: 2.48458
+0.121376
+Iteration 69 accepted; objective: 2224.83 ---> 2224.95
+Volume: 2.48432
+0.121392
+Iteration 70 accepted; objective: 2224.95 ---> 2225.08
+Volume: 2.48405
+0.121405
+Iteration 71 accepted; objective: 2225.08 ---> 2225.21
+Volume: 2.48377
+0.121413
+Iteration 72 accepted; objective: 2225.21 ---> 2225.35
+Volume: 2.48349
+0.121423
+Iteration 73 accepted; objective: 2225.35 ---> 2225.48
+Volume: 2.48321
+0.121426
+Iteration 74 accepted; objective: 2225.48 ---> 2225.62
+Volume: 2.48291
+0.121433
+Iteration 75 accepted; objective: 2225.62 ---> 2225.76
+Volume: 2.48261
+0.121431
+Iteration 76 accepted; objective: 2225.76 ---> 2225.9
+Volume: 2.48231
+0.121435
+Iteration 77 accepted; objective: 2225.9 ---> 2226.05
+Volume: 2.482
+0.121429
+Iteration 78 accepted; objective: 2226.05 ---> 2226.19
+Volume: 2.48168
+0.121433
+Iteration 79 accepted; objective: 2226.19 ---> 2226.34
+Volume: 2.48136
+0.121427
+Iteration 80 accepted; objective: 2226.34 ---> 2226.5
+Volume: 2.48103
+0.121428
+Iteration 81 accepted; objective: 2226.5 ---> 2226.65
+Volume: 2.48069
+0.121418
+Iteration 82 accepted; objective: 2226.65 ---> 2226.81
+Volume: 2.48035
+0.121417
+Iteration 83 accepted; objective: 2226.81 ---> 2226.97
+Volume: 2.47999
+0.121405
+Iteration 84 accepted; objective: 2226.97 ---> 2227.13
+Volume: 2.47964
+0.121406
+Iteration 85 accepted; objective: 2227.13 ---> 2227.3
+Volume: 2.47927
+0.121393
+Iteration 86 accepted; objective: 2227.3 ---> 2227.47
+Volume: 2.4789
+0.12139
+Iteration 87 accepted; objective: 2227.47 ---> 2227.64
+Volume: 2.47852
+0.121965
+Iteration 88 accepted; objective: 2227.64 ---> 2227.82
+Volume: 2.47813
+0.121865
+Iteration 89 accepted; objective: 2227.82 ---> 2228
+Volume: 2.47773
+0.121828
+Iteration 90 accepted; objective: 2228 ---> 2228.18
+Volume: 2.47733
+0.121869
+Iteration 91 accepted; objective: 2228.18 ---> 2228.36
+Volume: 2.47691
+0.121862
+Iteration 92 accepted; objective: 2228.36 ---> 2228.55
+Volume: 2.47649
+0.121916
+Iteration 93 accepted; objective: 2228.55 ---> 2228.74
+Volume: 2.47606
+0.121915
+Iteration 94 accepted; objective: 2228.74 ---> 2228.93
+Volume: 2.47562
+0.12196
+Iteration 95 accepted; objective: 2228.93 ---> 2229.13
+Volume: 2.47517
+0.121963
+Iteration 96 accepted; objective: 2229.13 ---> 2229.33
+Volume: 2.47471
+0.121998
+Iteration 97 accepted; objective: 2229.33 ---> 2229.54
+Volume: 2.47425
+0.122001
+Iteration 98 accepted; objective: 2229.54 ---> 2229.74
+Volume: 2.47377
+0.122026
+Iteration 99 accepted; objective: 2229.74 ---> 2229.96
+Volume: 2.47328
+0.122029
+Iteration 100 accepted; objective: 2229.96 ---> 2230.17
+Volume: 2.47279
+0.122038
+Iteration 101 accepted; objective: 2230.17 ---> 2230.48
+Volume: 2.47227
+0.122041
+Iteration 102 accepted; objective: 2230.48 ---> 2230.67
+Volume: 2.47175
+0.122051
+Iteration 103 accepted; objective: 2230.67 ---> 2230.89
+Volume: 2.47123
+0.12206
+Iteration 104 accepted; objective: 2230.89 ---> 2231.11
+Volume: 2.47069
+0.122055
+Iteration 105 accepted; objective: 2231.11 ---> 2231.49
+Volume: 2.47014
+0.122053
+Iteration 106 accepted; objective: 2231.49 ---> 2231.73
+Volume: 2.46958
+0.122052
+Iteration 107 accepted; objective: 2231.73 ---> 2231.97
+Volume: 2.469
+0.122051
+Iteration 108 accepted; objective: 2231.97 ---> 2232.24
+Volume: 2.46841
+0.122046
+Iteration 109 accepted; objective: 2232.24 ---> 2232.48
+Volume: 2.46781
+0.122042
+Iteration 110 accepted; objective: 2232.48 ---> 2232.73
+Volume: 2.4672
+0.122033
+Iteration 111 accepted; objective: 2232.73 ---> 2232.99
+Volume: 2.46658
+0.122025
+Iteration 112 accepted; objective: 2232.99 ---> 2233.25
+Volume: 2.46595
+0.122016
+Iteration 113 accepted; objective: 2233.25 ---> 2233.52
+Volume: 2.4653
+0.122004
+Iteration 114 accepted; objective: 2233.52 ---> 2233.79
+Volume: 2.46464
+0.121988
+Iteration 115 accepted; objective: 2233.79 ---> 2234.07
+Volume: 2.46397
+0.121974
+Iteration 116 accepted; objective: 2234.07 ---> 2234.35
+Volume: 2.46329
+0.121961
+Iteration 117 accepted; objective: 2234.35 ---> 2234.64
+Volume: 2.46258
+0.121946
+Iteration 118 accepted; objective: 2234.64 ---> 2234.92
+Volume: 2.46187
+0.121911
+Iteration 119 accepted; objective: 2234.92 ---> 2235.21
+Volume: 2.46114
+0.1219
+Iteration 120 accepted; objective: 2235.21 ---> 2235.51
+Volume: 2.4604
+0.121873
+Iteration 121 accepted; objective: 2235.51 ---> 2235.82
+Volume: 2.45964
+0.121845
+Iteration 122 accepted; objective: 2235.82 ---> 2236.13
+Volume: 2.45886
+0.121815
+Iteration 123 accepted; objective: 2236.13 ---> 2236.44
+Volume: 2.45807
+0.121783
+Iteration 124 accepted; objective: 2236.44 ---> 2236.76
+Volume: 2.45727
+0.121751
+Iteration 125 accepted; objective: 2236.76 ---> 2237.09
+Volume: 2.45644
+0.121717
+Iteration 126 accepted; objective: 2237.09 ---> 2237.42
+Volume: 2.4556
+0.121682
+Iteration 127 accepted; objective: 2237.42 ---> 2237.79
+Volume: 2.45474
+0.121633
+Iteration 128 accepted; objective: 2237.79 ---> 2238.04
+Volume: 2.45386
+0.121609
+Iteration 129 accepted; objective: 2238.04 ---> 2238.38
+Volume: 2.45297
+0.121571
+Iteration 130 accepted; objective: 2238.38 ---> 2238.73
+Volume: 2.45206
+0.121511
+Iteration 131 accepted; objective: 2238.73 ---> 2239.09
+Volume: 2.45113
+0.121486
+Iteration 132 accepted; objective: 2239.09 ---> 2239.46
+Volume: 2.45019
+0.121423
+Iteration 133 accepted; objective: 2239.46 ---> 2239.83
+Volume: 2.44922
+0.121403
+Iteration 134 accepted; objective: 2239.83 ---> 2240.21
+Volume: 2.44824
+0.121356
+Iteration 135 accepted; objective: 2240.21 ---> 2240.6
+Volume: 2.44723
+0.121304
+Iteration 136 accepted; objective: 2240.6 ---> 2240.99
+Volume: 2.44621
+0.121238
+Iteration 137 accepted; objective: 2240.99 ---> 2241.39
+Volume: 2.44516
+0.121186
+Iteration 138 accepted; objective: 2241.39 ---> 2241.77
+Volume: 2.44409
+0.121126
+Iteration 139 accepted; objective: 2241.77 ---> 2242.17
+Volume: 2.443
+0.121099
+Iteration 140 accepted; objective: 2242.17 ---> 2242.63
+Volume: 2.44189
+0.121023
+Iteration 141 accepted; objective: 2242.63 ---> 2243.06
+Volume: 2.44075
+0.120978
+Iteration 142 accepted; objective: 2243.06 ---> 2243.48
+Volume: 2.4396
+0.12092
+Iteration 143 accepted; objective: 2243.48 ---> 2243.86
+Volume: 2.43841
+0.120874
+Iteration 144 accepted; objective: 2243.86 ---> 2244.19
+Volume: 2.43717
+0.120795
+Iteration 145 accepted; objective: 2244.19 ---> 2244.75
+Volume: 2.43595
+0.124974
+Iteration 146 accepted; objective: 2244.75 ---> 2245.14
+Volume: 2.43469
+0.120673
+Iteration 147 accepted; objective: 2245.14 ---> 2245.65
+Volume: 2.43335
+0.12442
+Iteration 148 accepted; objective: 2245.65 ---> 2246.02
+Volume: 2.43205
+0.120553
+Iteration 149 accepted; objective: 2246.02 ---> 2246.58
+Volume: 2.43067
+0.123948
+Iteration 150 accepted; objective: 2246.58 ---> 2247
+Volume: 2.42932
+0.120413
+Iteration 151 accepted; objective: 2247 ---> 2247.57
+Volume: 2.42789
+0.123852
+Iteration 152 accepted; objective: 2247.57 ---> 2248
+Volume: 2.42648
+0.120269
+Iteration 153 accepted; objective: 2248 ---> 2248.59
+Volume: 2.42499
+0.123708
+Iteration 154 accepted; objective: 2248.59 ---> 2249.03
+Volume: 2.42352
+0.120124
+Iteration 155 accepted; objective: 2249.03 ---> 2249.63
+Volume: 2.42197
+0.123905
+Iteration 156 accepted; objective: 2249.63 ---> 2250.08
+Volume: 2.42043
+0.119979
+Iteration 157 accepted; objective: 2250.08 ---> 2250.69
+Volume: 2.41882
+0.123916
+Iteration 158 accepted; objective: 2250.69 ---> 2251.15
+Volume: 2.41722
+0.123851
+Iteration 159 accepted; objective: 2251.15 ---> 2251.72
+Volume: 2.41553
+0.1236
+Iteration 160 accepted; objective: 2251.72 ---> 2252.28
+Volume: 2.41381
+0.123432
+Iteration 161 accepted; objective: 2252.28 ---> 2252.85
+Volume: 2.41206
+0.123383
+Iteration 162 accepted; objective: 2252.85 ---> 2253.47
+Volume: 2.41027
+0.123321
+Iteration 163 accepted; objective: 2253.47 ---> 2254.02
+Volume: 2.40844
+0.123275
+Iteration 164 accepted; objective: 2254.02 ---> 2254.59
+Volume: 2.40658
+0.123243
+Iteration 165 accepted; objective: 2254.59 ---> 2255.17
+Volume: 2.40468
+0.123221
+Iteration 166 accepted; objective: 2255.17 ---> 2255.75
+Volume: 2.40273
+0.123203
+Iteration 167 accepted; objective: 2255.75 ---> 2256.34
+Volume: 2.40075
+0.123187
+Iteration 168 accepted; objective: 2256.34 ---> 2256.94
+Volume: 2.39872
+0.123164
+Iteration 169 accepted; objective: 2256.94 ---> 2257.54
+Volume: 2.39665
+0.123137
+Iteration 170 accepted; objective: 2257.54 ---> 2258.15
+Volume: 2.39453
+0.123115
+Iteration 171 accepted; objective: 2258.15 ---> 2258.69
+Volume: 2.39237
+0.125452
+Iteration 172 accepted; objective: 2258.69 ---> 2259.27
+Volume: 2.39017
+0.1232
+Iteration 173 accepted; objective: 2259.27 ---> 2259.97
+Volume: 2.38787
+0.123973
+Iteration 174 accepted; objective: 2259.97 ---> 2260.53
+Volume: 2.38556
+0.123149
+Iteration 175 accepted; objective: 2260.53 ---> 2261.22
+Volume: 2.38319
+0.123289
+Iteration 176 accepted; objective: 2261.22 ---> 2261.9
+Volume: 2.38079
+0.12324
+Iteration 177 accepted; objective: 2261.9 ---> 2262.48
+Volume: 2.37833
+0.123271
+Iteration 178 accepted; objective: 2262.48 ---> 2263.13
+Volume: 2.37581
+0.123724
+Iteration 179 accepted; objective: 2263.13 ---> 2263.62
+Volume: 2.37325
+0.123252
+Iteration 180 accepted; objective: 2263.62 ---> 2264.42
+Volume: 2.37061
+0.124249
+Iteration 181 accepted; objective: 2264.42 ---> 2264.88
+Volume: 2.36793
+0.124545
+Iteration 182 accepted; objective: 2264.88 ---> 2265.52
+Volume: 2.36517
+0.12535
+Iteration 183 accepted; objective: 2265.52 ---> 2266.17
+Volume: 2.36234
+0.125885
+Iteration 184 accepted; objective: 2266.17 ---> 2266.76
+Volume: 2.35941
+0.126257
+Iteration 185 accepted; objective: 2266.76 ---> 2267.33
+Volume: 2.35642
+0.126506
+Iteration 186 accepted; objective: 2267.33 ---> 2267.99
+Volume: 2.35335
+0.12674
+Iteration 187 accepted; objective: 2267.99 ---> 2268.65
+Volume: 2.35021
+0.126954
+Iteration 188 accepted; objective: 2268.65 ---> 2269.3
+Volume: 2.34699
+0.127151
+Iteration 189 accepted; objective: 2269.3 ---> 2269.94
+Volume: 2.3437
+0.127348
+Iteration 190 accepted; objective: 2269.94 ---> 2270.68
+Volume: 2.34031
+0.127486
+Iteration 191 accepted; objective: 2270.68 ---> 2271.39
+Volume: 2.33686
+0.127618
+Iteration 192 accepted; objective: 2271.39 ---> 2271.99
+Volume: 2.33334
+0.127784
+Iteration 193 accepted; objective: 2271.99 ---> 2272.59
+Volume: 2.32974
+0.127912
+Iteration 194 accepted; objective: 2272.59 ---> 2273.19
+Volume: 2.32604
+0.128049
+Iteration 195 accepted; objective: 2273.19 ---> 2273.9
+Volume: 2.32227
+0.128163
+Iteration 196 accepted; objective: 2273.9 ---> 2274.59
+Volume: 2.3184
+0.128301
+Iteration 197 accepted; objective: 2274.59 ---> 2275.15
+Volume: 2.31444
+0.128456
+Iteration 198 accepted; objective: 2275.15 ---> 2275.7
+Volume: 2.31038
+0.128592
+Iteration 199 accepted; objective: 2275.7 ---> 2276.39
+Volume: 2.30623
+0.128771
+Iteration 200 accepted; objective: 2276.39 ---> 2276.87
+Volume: 2.30199
+0.128929
+Iteration 201 accepted; objective: 2276.87 ---> 2277.35
+Volume: 2.29764
+0.129081
+Iteration 202 accepted; objective: 2277.35 ---> 2277.81
+Volume: 2.29318
+0.129248
+Iteration 203 accepted; objective: 2277.81 ---> 2278.25
+Volume: 2.28862
+0.129407
+Iteration 204 accepted; objective: 2278.25 ---> 2278.67
+Volume: 2.28395
+0.129577
+Iteration 205 accepted; objective: 2278.67 ---> 2279.16
+Volume: 2.27916
+0.129716
+Iteration 206 accepted; objective: 2279.16 ---> 2279.31
+Volume: 2.27424
+0.129925
+Iteration 207 accepted; objective: 2279.31 ---> 2279.87
+Volume: 2.26924
+0.130113
+Iteration 208 accepted; objective: 2279.87 ---> 2280.1
+Volume: 2.26408
+0.130305
+Iteration 209 accepted; objective: 2280.1 ---> 2280.47
+Volume: 2.25881
+0.130501
+Iteration 210 accepted; objective: 2280.47 ---> 2280.72
+Volume: 2.25342
+0.130688
+Iteration 211 accepted; objective: 2280.72 ---> 2280.88
+Volume: 2.24785
+0.130893
+Iteration 212 accepted; objective: 2280.88 ---> 2281.33
+Volume: 2.24219
+0.131098
+Iteration 213 accepted; objective: 2281.33 ---> 2281.12
+Volume: 2.23636
+0.131346
+Iteration 214 accepted; objective: 2281.12 ---> 2281.05
+Volume: 2.23037
+0.131559
+Iteration 215 accepted; objective: 2281.05 ---> 2281.07
+Volume: 2.22432
+0.13182
+Iteration 216 accepted; objective: 2281.07 ---> 2281.02
+Volume: 2.21797
+0.13208
+Iteration 217 accepted; objective: 2281.02 ---> 2280.89
+Volume: 2.21156
+0.132357
+Iteration 218 accepted; objective: 2280.89 ---> 2280.76
+Volume: 2.20492
+0.132539
+Iteration 219 accepted; objective: 2280.76 ---> 2280.38
+Volume: 2.19811
+0.132993
+Iteration 220 accepted; objective: 2280.38 ---> 2279.93
+Volume: 2.19118
+0.132034
+Iteration 221 accepted; objective: 2279.93 ---> 2279.56
+Volume: 2.18403
+0.132628
+Iteration 222 accepted; objective: 2279.56 ---> 2279.02
+Volume: 2.17678
+0.13209
+Iteration 223 accepted; objective: 2279.02 ---> 2278.21
+Volume: 2.16937
+0.131166
+Iteration 224 accepted; objective: 2278.21 ---> 2277.86
+Volume: 2.16176
+0.130987
+Iteration 225 accepted; objective: 2277.86 ---> 2276.88
+Volume: 2.15411
+0.130602
+Iteration 226 accepted; objective: 2276.88 ---> 2275.95
+Volume: 2.1463
+0.130469
+Iteration 227 accepted; objective: 2275.95 ---> 2274.53
+Volume: 2.13833
+0.130486
+Iteration 228 accepted; objective: 2274.53 ---> 2273.31
+Volume: 2.13017
+0.130969
+Iteration 229 accepted; objective: 2273.31 ---> 2272.02
+Volume: 2.12182
+0.132115
+Iteration 230 accepted; objective: 2272.02 ---> 2270.35
+Volume: 2.11324
+0.132978
+Iteration 231 accepted; objective: 2270.35 ---> 2268.55
+Volume: 2.10437
+0.133541
+Iteration 232 accepted; objective: 2268.55 ---> 2266.64
+Volume: 2.09523
+0.134098
+Iteration 233 accepted; objective: 2266.64 ---> 2264.58
+Volume: 2.08577
+0.134512
+Iteration 234 accepted; objective: 2264.58 ---> 2262.47
+Volume: 2.07609
+0.134776
+Iteration 235 accepted; objective: 2262.47 ---> 2260.08
+Volume: 2.06614
+0.135187
+Iteration 236 accepted; objective: 2260.08 ---> 2257.3
+Volume: 2.05592
+0.135522
+Iteration 237 accepted; objective: 2257.3 ---> 2254.36
+Volume: 2.04543
+0.13591
+Iteration 238 accepted; objective: 2254.36 ---> 2251.28
+Volume: 2.03464
+0.136262
+Iteration 239 accepted; objective: 2251.28 ---> 2248.28
+Volume: 2.02351
+0.136817
+Iteration 240 accepted; objective: 2248.28 ---> 2244.61
+Volume: 2.01209
+0.137184
+Iteration 241 accepted; objective: 2244.61 ---> 2240.89
+Volume: 2.00032
+0.1377
+Iteration 242 accepted; objective: 2240.89 ---> 2236.64
+Volume: 1.98824
+0.138102
+Iteration 243 accepted; objective: 2236.64 ---> 2231.96
+Volume: 1.97582
+0.132863
+Iteration 244 accepted; objective: 2231.96 ---> 2227.27
+Volume: 1.96305
+0.134323
+Iteration 245 accepted; objective: 2227.27 ---> 2222.14
+Volume: 1.95043
+0.134708
+Iteration 246 accepted; objective: 2222.14 ---> 2216.82
+Volume: 1.93738
+0.135116
+Iteration 247 accepted; objective: 2216.82 ---> 2211.23
+Volume: 1.92388
+0.134052
+Iteration 248 accepted; objective: 2211.23 ---> 2205.29
+Volume: 1.90996
+0.134751
+Iteration 249 accepted; objective: 2205.29 ---> 2198.81
+Volume: 1.89576
+0.13769
+Iteration 250 accepted; objective: 2198.81 ---> 2192.2
+Volume: 1.8812
+0.139432
+Iteration 251 accepted; objective: 2192.2 ---> 2184.98
+Volume: 1.86599
+0.140911
+Iteration 252 accepted; objective: 2184.98 ---> 2177.07
+Volume: 1.8503
+0.142191
+Iteration 253 accepted; objective: 2177.07 ---> 2167.91
+Volume: 1.83393
+0.139182
+Iteration 254 accepted; objective: 2167.91 ---> 2158.83
+Volume: 1.81699
+0.135313
+Iteration 255 accepted; objective: 2158.83 ---> 2149.11
+Volume: 1.80014
+0.128309
+Iteration 256 accepted; objective: 2149.11 ---> 2139.23
+Volume: 1.7833
+0.124122
+Iteration 257 accepted; objective: 2139.23 ---> 2129.04
+Volume: 1.76693
+0.122614
+Iteration 258 accepted; objective: 2129.04 ---> 2118.54
+Volume: 1.75063
+0.122724
+Iteration 259 accepted; objective: 2118.54 ---> 2108.04
+Volume: 1.73414
+0.123983
+Iteration 260 accepted; objective: 2108.04 ---> 2096.9
+Volume: 1.71735
+0.138863
+Iteration 261 accepted; objective: 2096.9 ---> 2085.41
+Volume: 1.6999
+0.137508
+Iteration 262 accepted; objective: 2085.41 ---> 2071.31
+Volume: 1.67978
+0.139578
+Iteration 263 accepted; objective: 2071.31 ---> 2057.31
+Volume: 1.65931
+0.139981
+Iteration 264 accepted; objective: 2057.31 ---> 2041.89
+Volume: 1.63812
+0.141051
+Iteration 265 accepted; objective: 2041.89 ---> 2025.56
+Volume: 1.61616
+0.141896
+Iteration 266 accepted; objective: 2025.56 ---> 2007.87
+Volume: 1.59339
+0.137013
+Iteration 267 accepted; objective: 2007.87 ---> 1989.13
+Volume: 1.56988
+0.135964
+Iteration 268 accepted; objective: 1989.13 ---> 1970.02
+Volume: 1.54654
+0.133793
+Iteration 269 accepted; objective: 1970.02 ---> 1949.95
+Volume: 1.52281
+0.131582
+Iteration 270 accepted; objective: 1949.95 ---> 1929.86
+Volume: 1.49892
+0.132352
+Iteration 271 accepted; objective: 1929.86 ---> 1908.62
+Volume: 1.47474
+0.130024
+Iteration 272 accepted; objective: 1908.62 ---> 1886.23
+Volume: 1.44976
+0.130744
+Iteration 273 accepted; objective: 1886.23 ---> 1863.42
+Volume: 1.42467
+0.131502
+Iteration 274 accepted; objective: 1863.42 ---> 1838.88
+Volume: 1.39868
+0.140813
+Iteration 275 accepted; objective: 1838.88 ---> 1813.25
+Volume: 1.37177
+0.129027
+Iteration 276 accepted; objective: 1813.25 ---> 1784.37
+Volume: 1.34243
+0.122083
+Iteration 277 accepted; objective: 1784.37 ---> 1756.99
+Volume: 1.31473
+0.116358
+Iteration 278 accepted; objective: 1756.99 ---> 1729.64
+Volume: 1.28797
+0.115299
+Iteration 279 accepted; objective: 1729.64 ---> 1703.13
+Volume: 1.26188
+0.118658
+Iteration 280 accepted; objective: 1703.13 ---> 1675.8
+Volume: 1.23559
+0.11824
+Iteration 281 accepted; objective: 1675.8 ---> 1646.52
+Volume: 1.2079
+0.116177
+Iteration 282 accepted; objective: 1646.52 ---> 1615.37
+Volume: 1.1796
+0.116226
+Iteration 283 accepted; objective: 1615.37 ---> 1584.37
+Volume: 1.1512
+0.120155
+Iteration 284 accepted; objective: 1584.37 ---> 1551.81
+Volume: 1.12249
+0.126097
+Iteration 285 accepted; objective: 1551.81 ---> 1517.73
+Volume: 1.0922
+0.133443
+Iteration 286 accepted; objective: 1517.73 ---> 1480.42
+Volume: 1.05966
+0.119055
+Iteration 287 accepted; objective: 1480.42 ---> 1438.77
+Volume: 1.02432
+0.115424
+Iteration 288 accepted; objective: 1438.77 ---> 1400.46
+Volume: 0.992269
+0.123651
+Iteration 289 accepted; objective: 1400.46 ---> 1362.68
+Volume: 0.960704
+0.125659
+Iteration 290 accepted; objective: 1362.68 ---> 1320.5
+Volume: 0.926151
+0.113972
+Iteration 291 accepted; objective: 1320.5 ---> 1275.82
+Volume: 0.890354
+0.119457
+Iteration 292 accepted; objective: 1275.82 ---> 1235.22
+Volume: 0.857817
+0.110161
+Iteration 293 accepted; objective: 1235.22 ---> 1191.04
+Volume: 0.822978
+0.10828
+Iteration 294 accepted; objective: 1191.04 ---> 1148.65
+Volume: 0.790393
+0.0924644
+Iteration 295 accepted; objective: 1148.65 ---> 1105.86
+Volume: 0.75725
+0.0921291
+Iteration 296 accepted; objective: 1105.86 ---> 1069.23
+Volume: 0.729024
+0.0922828
+Iteration 297 accepted; objective: 1069.23 ---> 1031.93
+Volume: 0.700646
+0.109828
+Iteration 298 accepted; objective: 1031.93 ---> 992.882
+Volume: 0.671593
+0.0928669
+Iteration 299 accepted; objective: 992.882 ---> 945.874
+Volume: 0.636286
+0.110974
+^C try getConsole D:\Ecole Polytechnique\2019-P2\Etude\MAP562\PC7\home.edp

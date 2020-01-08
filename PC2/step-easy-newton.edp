@@ -1,0 +1,102 @@
+// MAP 562 (G. Allaire, B. Bogosel)
+// Jan 17, 2019
+//
+// Task 1: Run the program
+// Task 2: Understand how the second order derivative is obtained (recall the
+//   theoretical exercise) and how Newton's method is implemented
+// Task 3: What is the step-size in this program?
+//   Can we change the step-size and if yes to what values?
+//   To what would other step-sizes correspond? (Hint: globalization)
+// Task 4: Run gradient method and Newton's method and compare
+//   the number of iterations
+// Task 5: How does the Newton method behave when you change the initialization?
+
+
+// Number of boundary edges
+int N=50;
+
+real eps=1e-6;
+
+// Tolerance for the Newton solver
+real lowertolerance = 1.e-6;
+
+macro vh() P1 //
+
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+
+fespace Vh(Th,vh);
+// Similar to the gradient method:
+// du: Newton update
+// phi: test function
+// u: solution u^k
+Vh du, f, u,phi,error;
+
+f=x^2+1;
+//f=sqrt((x-0.5)^2+(y-0.5)^2)-0.2;
+
+// Set initial Newton Newton guess u^0 to zero
+// close to the minimiser
+u = 1;
+
+// Implement the functional given in the exercise
+macro J(u) int2d(Th)(0.25*u^4-f*u);
+//
+
+
+// Implement the Newton problem
+// As in the slides of chapter 3, page 37, we now need
+// also the second derivative of the functional J.
+// Specifically we need to determine the update du.
+// This is done by solving a linear equation system of
+// the form J''(u)(du,phi) = -J'(u)(phi) for all phi
+
+
+// Implement the gradient given in the exercise
+macro dJ(u,f) u^3-f;
+//
+// Implement the second-order derivative and Newton algorithm
+problem Jlin(du,phi)=
+    int2d(Th)((3*u^2+eps)*du*phi)
+   +int2d(Th)((u^3-f)*phi);
+
+// Solution loop
+// Initialize the norm
+real funcnorm = 1.0e+10;
+int i=0;
+
+// Final loop
+while(funcnorm > lowertolerance)
+{
+	// Solve the (linear) problem, which yields the Newton update du
+	//Jlin;
+
+        // direct identification of du
+				//J'/J''
+				//eps to evoid divide by zero
+         du = -(u^3-f)/(3*u^2+eps);
+
+
+	// Add update to previous solution u
+	u=u+du;
+
+	// Compute the norm of the solution
+	funcnorm=sqrt(int2d(Th)(du*du));
+
+        // L infinity error
+        error = abs(u^3-f);
+
+
+	// Evaluate the value of the functional w.r.t. to the current solution
+	real evalJ = J(u);
+	cout<<"#"<<i<<" J ="<<evalJ << " residual " <<funcnorm<<
+        " L-infinity error: " << error[].linfty << endl;
+	plot(u,cmm="#"+i+" J="+evalJ+" normw = "+funcnorm,wait=0,fill=1);
+	i++;
+}

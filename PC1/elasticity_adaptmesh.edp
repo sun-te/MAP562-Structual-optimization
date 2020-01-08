@@ -1,0 +1,63 @@
+// Resolution of
+// - \div(2\mu e(u))+\div(u)\Id) = f 	in \Omega
+//	u=0		on \Gamma_D
+//	(2\mu e(u))+\div(u)\Id)n=g 	on \Gamma_N
+
+int Nb=20;		// Nb of edges on the boundary
+real L=10,H=1;		// Length/Height of the domain
+real lambda=1,mu=1;	// Lamé moduli
+macro f [0,-1]		// Applied volumic loads
+macro g [0,0]		// Boundary loads
+macro vh() [P1,P1]	// finite element space used for displacement
+macro rh() P0		// finite element space used for constraints
+
+mesh Sh;                // define mesh
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaN,GammaN,GammaD];
+	Sh=square(Nb*L,Nb*H,[L*x,y*H],label=labels);
+        // construct rectangular mesh using the keyword "square"
+}
+
+
+// macros allow to simplify the writing of formulas
+// a macro is replaced verbatim when used in the code
+// a macro always ends with  "//"
+
+macro u [u1,u2]//
+macro v [v1,v2]//
+fespace Vh(Sh,vh);	// finite element space
+Vh u,v;			// state and test functions
+
+real sqrt2=sqrt(2.);    // define a constant when using it in a vector
+                        // otherwise the code will recompute it
+                        // many times
+
+macro e(u) [dx(u[0]),dy(u[1]),(dx(u[1])+dy(u[0]))/sqrt2]// symmetric gradient operator
+macro div(u) (dx(u[0])+dy(u[1]))// divergence operator
+
+// state the elasticity problem using the macros
+problem elasticity(u,v)=
+      int2d(Sh)(2*mu*e(u)'*e(v)+lambda*div(u)*div(v))
+     -int2d(Sh)(f'*v)         // volume loads
+     +int1d(Sh,GammaN)(g'*v)  // surface loads
+     +on(GammaD,u1=0,u2=0);   // Dirichlet boundary conditions
+
+for(real error=1;error>1.e-4;error/=1.5)
+{
+	elasticity;         // solve the elasticity problem
+	Sh=adaptmesh(Sh,u,err=error);  // adapt the mesh in order to decrease the error
+                            // useful for domains producing singularities, like the L-beam
+}
+elasticity;
+{
+	fespace Rh(Sh,rh);
+	Rh sigma=sqrt((2.*mu*e(u)+[div(u),div(u),0])'*(2.*mu*e(u)+[div(u),div(u),0]));  // constraints 
+	real exa=H/u1[].linfty; // exaggeration factor
+      // use the command movemesh to see the deformation
+	mesh Th=movemesh(Sh,[x+exa*u1,y+exa*u2]);
+	fespace Qh(Th,rh);
+	Qh Sigma=0; Sigma[]=sigma[];
+	plot(Sigma,fill=1,cmm="constraints on deformed mesh; exa="+exa);
+}

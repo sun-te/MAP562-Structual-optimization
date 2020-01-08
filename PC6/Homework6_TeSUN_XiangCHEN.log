@@ -1,0 +1,205 @@
+-- FreeFem++ v4.400001 (lun.  2 sept. 2019 15:27:46 - git v4.4-1-14-gab6f1dfe)
+ Load: lg_fem lg_mesh lg_mesh3 eigenvalue
+    1 :
+    2 :
+    3 : // Optimize the position and parameters of an superellipse so that the compliance is minimized
+    4 :
+    5 :
+    6 : real a=0.5,b=1,l=2;
+    7 : real cx = 0.0,cy=0.1;
+    8 : int maxiter = 200;
+    9 : real maxstep = 0.01;
+   10 :
+   11 : real fixedV = 1;
+   12 :
+   13 : real step = 0.05;
+   14 :
+   15 : verbosity = 0;
+   16 :
+   17 : real alpha =0.5;
+   18 :
+   19 : real E=1;                       // Young modulus
+   20 : real nu=0.3;                    // Poisson coefficient (between -1 and 1/2)
+   21 :
+   22 : real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+   23 : real mu=E/(2.*(1.+nu));
+   24 :
+   25 : int NN = 10;
+   26 : int Ni = 2;
+   27 :
+   28 : int GammaD = 0,GammaN = 1,Gamma0=20;
+   29 :
+   30 : border left(t=l,-l){x=-l;y=t;label=GammaD;}
+   31 : border bot(t=-l,l){x=t;y=-l;label=GammaN;}
+   32 : border right(t=-l,l){x=l;y=t;label=GammaN;}
+   33 : border top(t=l,-l){x=t;y=l;label=GammaN;}
+   34 :
+   35 : border superellipse(t=0,2*pi){
+   36 :   if(t>=0 && t<=0.5*pi){
+   37 :    x = a*sqrt(cos(t))+cx;
+   38 :    y = b*sqrt(sin(t))+cy;
+   39 :   }
+   40 :   else if(t<=1.0*pi && t>=0.5*pi){
+   41 :     x = -a*sqrt(-cos(t))+cx;
+   42 :     y = b*sqrt(sin(t))+cy;
+   43 :   }
+   44 :   else if(t>=pi && t<=1.5*pi){
+   45 :     x = -a*sqrt(-cos(t))+cx;
+   46 :     y = -b*sqrt(-sin(t))+cy;
+   47 :   }
+   48 :   else{
+   49 :     x = a*sqrt(cos(t))+cx;
+   50 :     y = -b*sqrt(-sin(t))+cy;
+   51 :   }
+   52 :    label = Gamma0;
+   53 : }
+   54 :
+   55 : plot(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+   56 :                    +superellipse(Ni*(a+b)*pi*NN),wait=1);
+   57 :
+   58 : // Gamma(1.25)^2/Gamma(1.5)
+   59 : real ratiogamma=0.9064024770554788^2 / (sqrt(pi)*0.5);
+   60 :
+   61 :
+   62 : real ratio = 4*ratiogamma*a*b/fixedV;
+   63 :    a = a/sqrt(ratio);
+   64 :    b = b/sqrt(ratio);
+   65 :
+   66 : mesh Th = buildmesh(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+   67 :                    +superellipse(-Ni*(a+b)*pi*NN));
+   68 :
+   69 : plot(Th);
+   70 :
+   71 : fespace Vh(Th,P1);
+   72 : fespace Vh0(Th,P0);
+   73 :
+   74 : Vh ux,uy,vx,vy;
+   75 :
+   76 :
+   77 : real sqrt2 = sqrt(2);
+   78 : macro e(ux,uy) [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2] )   [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]//
+   79 : macro div(ux,uy) (dx(ux)+dy(uy)) )   (dx(ux)+dy(uy))//
+   80 : macro Aeueu(ux,uy) (2*mu*e(ux,uy)'*e(ux,uy)+lambda*div(ux,uy)*div(ux,uy)) )   (2*mu*e(ux,uy)'*e(ux,uy)+lambda*di §qv(ux,uy)*div(ux,uy))//
+   81 :
+   82 : problem elasticity([ux,uy],[vx,vy],solver=sparsesolver) =
+   83 :   int2d(Th)(2*mu*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]'*e(vx,vy)  [dx(vx),dy(vy),(dx(vy)+dy(vx))/sqrt2 §q]+lambda*div(ux,uy)  (dx(ux)+dy(uy))*div(vx,vy)  (dx(vx)+dy(vy)))
+   84 :  -int1d(Th,GammaN)(N.x*vx+alpha*N.y*vy)
+   85 :  +on(GammaD,ux=0,uy=0);
+   86 :
+   87 : elasticity;
+   88 : plot([ux,uy]);
+   89 :
+   90 : real compliance = int2d(Th)(Aeueu(ux,uy)  (2*mu*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]'*e(ux,uy)  [dx(u §qx),dy(uy),(dx(uy)+dy(ux))/sqrt2]+lambda*div(ux,uy)  (dx(ux)+dy(uy))*div(ux,uy)  (dx(ux)+dy(uy))));
+   91 : cout << "Compliance: " << compliance << endl;
+   92 :
+   93 : real compliance2 = int1d(Th,GammaN)(N.x*ux+alpha*N.y*uy);
+   94 : cout << "Compliance: " << compliance2 << endl;
+   95 :
+   96 : Vh0 grad;
+   97 : grad = -Aeueu(ux,uy)  (2*mu*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]'*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy §q(ux))/sqrt2]+lambda*div(ux,uy)  (dx(ux)+dy(uy))*div(ux,uy)  (dx(ux)+dy(uy)));
+   98 :
+   99 : real valold = 1e100;
+  100 :
+  101 : real aold,bold,cxold,cyold;
+  102 :
+  103 : real[int] vals(maxiter);
+  104 : vals[0]=compliance;
+  105 :
+  106 :
+  107 : aold = a;
+  108 : bold = b;
+  109 : cxold = cx;
+  110 : cyold = cy;
+  111 :
+  112 : for(int i=1;i<maxiter;i++){
+  113 :    // derivatives with respect to the parameters of the problem
+  114 :    // note that only the vector field describing the boundary perturbation is needed in order to find these deri §qvatives
+  115 :
+  116 :    // the center of the superellipse
+  117 :    real derivx = int1d(Th,Gamma0)(grad*N.x);
+  118 :    real derivy = int1d(Th,Gamma0)(grad*N.y);
+  119 :    // the parameters of the superellipse
+  120 :    real deriva = int1d(Th,Gamma0)(grad*(N.x*(x-cx)/a));
+  121 :    real derivb = int1d(Th,Gamma0)(grad*(N.y*(y-cy)/b));
+  122 :
+  123 :    func signcos=2*(x>=0)-1;
+  124 :    func signsin=2*(y>=0)-1;
+  125 :
+  126 :    real nxy = sqrt(derivx^2+derivy^2);
+  127 :    real nab = sqrt(deriva^2+derivb^2);
+  128 :
+  129 :    // normalize gradients since the difference is too big sometimes...
+  130 :    // note that this also gives a descent direction
+  131 :    derivx = derivx/nxy;
+  132 :    derivy = derivy/nxy;
+  133 :    deriva = deriva/nab;
+  134 :    derivb = derivb/nab;
+  135 :
+  136 :    cout << derivx << " " << derivy << endl;
+  137 :    cout << deriva << " " << derivb << endl;
+  138 :
+  139 :    // Gradient descent step
+  140 :    cx = cx-step*derivx;
+  141 :    cy = cy-step*derivy;
+  142 :
+  143 :    a  = a-step*deriva;
+  144 :    b  = b-step*derivb;
+  145 :
+  146 :    // check to see if the superellipse can fit into the square
+  147 :    a  = max(0.01,min(l-0.01,a));
+  148 :    b  = max(0.01,min(l-0.01,b));
+  149 :
+  150 :
+  151 :    // project on the area constraint
+  152 :    real ratio = 4*ratiogamma*a*b/fixedV;
+  153 :    a = a/sqrt(ratio);
+  154 :    b = b/sqrt(ratio);
+  155 :
+  156 :    // make sure that the center of the superellipse is compatible with the superellipse being interior to the sq §quare
+  157 :    cx = max(cx,-l+a+0.1);
+  158 :    cx = min(cx,l-a-0.1);
+  159 :
+  160 :    //cout << cx << " " << cy << endl;
+  161 :    //cout << a << " " << b << endl;
+  162 :
+  163 :
+  164 :    // once everything is done, construct the new mesh
+  165 :    Th = buildmesh(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+  166 :                    +superellipse(-Ni*(a+b)*pi*NN));
+  167 :
+  168 :
+  169 :    plot(Th,wait=0);
+  170 :
+  171 :    // solve the problem and compute the compliance
+  172 :    elasticity;
+  173 :    real compliance = int2d(Th)(Aeueu(ux,uy)  (2*mu*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]'*e(ux,uy)  [d §qx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]+lambda*div(ux,uy)  (dx(ux)+dy(uy))*div(ux,uy)  (dx(ux)+dy(uy))));
+  174 :    vals[i] = compliance;
+  175 :    if(compliance<valold){
+  176 :        // If the compliance is decreased, compute the new gradient and advance
+  177 :        cout << "Accept" << endl;
+  178 :        cout << "Compliance: " << compliance << endl;
+  179 :         grad = -Aeueu(ux,uy)  (2*mu*e(ux,uy)  [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]'*e(ux,uy)  [dx(ux),dy(uy),(d §qx(uy)+dy(ux))/sqrt2]+lambda*div(ux,uy)  (dx(ux)+dy(uy))*div(ux,uy)  (dx(ux)+dy(uy)));
+  180 :         step = min(maxstep,1.1*step);
+  181 :         aold = a;
+  182 :         bold = b;
+  183 :         cxold = cx;
+  184 :         cyold = cy;
+  185 :         valold = compliance;
+  186 :    }
+  187 :    else{
+  188 :         cout << " Reject" << endl;
+  189 :         step = step*0.5;
+  190 :         a = aold;b=bold;cx=cxold;cy=cyold;
+  191 :    }
+  192 : }
+  193 : real coef=1;
+  194 : mesh Dh = movemesh (Th,[x+ux*coef,y+uy*coef]);
+  195 : plot(Dh,wait=5,cmm="Deformation");
+  196 : //////////////////////////////////
+  197 : // Plot of the objectif Evolution//
+  198 : //////////////////////////////////
+  199 : real[int] dis = 1:vals.n;
+  200 : plot([dis,vals],wait=1,cmm="Evoluion of cost function");
+  201 :  sizestack + 1024 =3912  ( 2888 )
+ 
+ try getConsole D:\Ecole Polytechnique\2019-P2\Etude\MAP562\PC6\Homework6_TeSUN_XiangCHEN.edp

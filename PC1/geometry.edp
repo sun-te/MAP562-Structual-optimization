@@ -1,0 +1,144 @@
+// Examples of different geometries defined in FreeFem
+
+//=================================================================================
+// rectangle
+real H = 10, W = 5;
+int Nb = 2;
+int flag = 4;  // see what happens when changing the flag parameter (0,1,2,...)
+mesh Rectangle = square(Nb*W,Nb*H,[x*W,y*H],flags=flag);
+
+plot(Rectangle,cmm="Rectangular mesh",wait=1);
+
+//=================================================================================
+// Ellipse
+int Nd=100;
+real a=2,b=1;
+border El(t=0,2*pi){
+   x = a*cos(t);   // parametrization for the coordinates
+   y = b*sin(t);
+   label = 0;      // integer for identifying the boundary
+}
+// use buildmesh command to create mesh given boundary
+// the domain is considered to be on the left side of the parametrized curve
+// if a "bad sens" error appears, it means that the border is not ordered correctly
+
+// it is possible to plot the border before creating the mesh
+plot(El(100),wait=1,cmm="border of Ellipse");
+
+mesh Ellipse = buildmesh(El(100));
+plot(Ellipse,cmm="mesh of the Ellipse",wait=1);
+
+//=================================================================================
+// creating subdomains and holes
+real R=2,r=1;
+int Nc = 10;
+border C1(t=0,2*pi){
+   x = R*cos(t);
+   y = R*sin(t);
+   label = 0;  //大圆是0
+}
+
+border C2(t=0,2*pi){
+   x = r*cos(t);
+   y = r*sin(t);
+   label = 0;
+}
+//2*pi*R*Nc number of point on the boundary
+//如果内外的点数一样可以获得uniform的mesh
+mesh  = buildmesh(C1(2*pi*R*Nc)+C2(2*pi*r*Nc));
+//加号自动识别两个边界
+plot(Circle,wait=1,cmm="Mesh of two circles with different regions");
+
+// Identify a region number associated to a point
+int Omega0 = Circle(0,0).region;
+cout << "The point (0,0) lies in region number " << Omega0 << endl;
+
+int Omega1 = Circle(0.5*(R+r),0).region;
+cout << "The point (" << 0.5*(R+r) << "," << 0 <<") lies in region number " << Omega1 << endl;
+
+
+// In order to have a hole it is enough to reverse the orientation
+// of the inner boundary
+
+// In the same way it is possible to make multiple holes
+//方向用负号
+mesh Ring = buildmesh(C1(2*pi*R*Nc)+C2(-2*pi*r*Nc));
+plot(Ring,wait=1,cmm="Mesh of a ring");
+
+//=================================================================================
+// A square with many holes
+
+// this uses the multi-border function in FreeFem
+// An integer parameter can be added in the border definition
+// and arrays can be used to create multiple similar boundaries at once
+
+int N=3; //number of holes
+
+int nb = 50;  // parameter for mesh size
+
+real delta = 0.2;  // radius of the small disks
+int nbd = floor(1.0*nb/N*delta*2*pi); // estimate number of points
+                                      // on the boundary of the small disks
+                                      // in order to obtain a uniform mesh
+
+int bsquare = 0;  // labels
+int bdisk   = 1;
+
+// vertices of the squares
+real[int] xs(N^2),ys(N^2);
+
+real[int] initx = 0:(N^2-1);
+for(int i=0;i<N^2;i++){
+  xs[i] = floor(i/N)+0.5;
+  ys[i] = (i%N)+0.5;
+}
+
+cout << xs << endl;
+cout << ys << endl;
+
+int[int] Ndisk(N^2); // vector of integers for each disk
+
+Ndisk = 1;
+Ndisk = -nbd*Ndisk;
+
+cout << Ndisk << endl;
+
+// sides of the square
+border Cd(t=0,N){x = t;y=0;label=bsquare;}
+border Cr(t=0,N){x = N;y=t;label=bsquare;}
+border Cu(t=0,N){x = N-t;y=N;label=bsquare;}
+border Cl(t=0,N){x = 0;y=N-t;label=bsquare;}
+
+// create a multiple border with many disks with centers given by
+// the vectors xs and ys
+border disks(t=0,2*pi; i){
+    x=xs[i]+delta*cos(t);
+    y=ys[i]+delta*sin(t);
+    label=bdisk;
+}
+
+
+plot(Cd(nb)+Cr(nb)+Cu(nb)+Cl(nb)+disks(Ndisk));
+
+mesh ThSquare = buildmesh(Cd(nb)+Cr(nb)+Cu(nb)+Cl(nb)+disks(Ndisk));
+plot(ThSquare,cmm="Square with many holes");
+
+// L-beam
+// use multi-border to define a polygon
+
+real[int] xL = [0,1,1,0.4,0.4,0];
+real[int] yL = [0,0,0.4,0.4,1,1];
+int[int] labelL = [0,1,2,3,4,5];
+int[int] numberL = 4*[10,4,6,6,4,10];
+
+border Lbord(t=0,1; i){
+   int nexti = (i+1)%xL.n;
+   x = (1-t)*xL[i]+t*xL[nexti];
+   y = (1-t)*yL[i]+t*yL[nexti];
+   label = i;
+}
+
+plot(Lbord(numberL),cmm="Border of L-beam");
+
+mesh Lbeam = buildmesh(Lbord(numberL));
+plot(Lbeam,wait=1,cmm="Mesh of Lbeam");

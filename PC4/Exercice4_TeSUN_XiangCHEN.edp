@@ -1,0 +1,332 @@
+// Author: Te Sun & Xiang CHEN
+
+int niter=50;			// Number of iterations
+int n=2;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume constraint
+real lagmin, lagmax ;		// Bounds for the Lagrange multiplier
+int inddico ;
+real volume0;			// Initial volume
+real volume,volume1;		// Volume of the current shape
+real exa=1;			// Coefficient for the shape deformation
+string caption;			// Caption for the graphics
+real E=100;			// Young modulus
+real nu=0.3;			// Poisson coefficient
+func g1=0;  			// Applied forces
+func g2=100;      // Here the value on the second direction is positive
+
+int m;
+real scale=1;     // coefficient for the size of mesh
+
+//target movement
+real uo=0.;
+real vo=0.2;
+
+real TOL = 1e-5;
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+
+//////////////////////////////////////
+// Computation of Lame coefficients //
+//////////////////////////////////////
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+////////////////////////////////////////////////////
+// Lower and upper bounds for the plate thickness //
+////////////////////////////////////////////////////
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.5;
+func h0=hmoy ;
+
+
+int GammaD=0;       // conditions Dirichlet
+int GammaN=1;       // conditions Neumann
+int GammaS=3;       // conditions symmetry which shows that the variation on the direction y is zero
+int GammaF=4;       // Free boundary
+
+real[int] xL,yL;
+real R;
+int[int] labelL,numberL;
+
+real c1,c2;
+int n1,n2;
+real b1,b2,b3,b4;
+
+// Vertice : the coordinate of three points of target space
+// in order to draw the 2 different regions in the mesh
+real[int] vertice1(2),vertice2(2),vertice3(2);
+
+int shape;
+
+// Here are the two different shapes:
+// one is just like the shape that the sheet shows, we mesure it with ruler
+// the other is the first mesh we created
+// The reason why we put these two shapes is that:
+// Before Tuesday, when the left side is still condition Dirichlet, we found that
+// these two results are quite different. In the second case, the space below the
+// circle is more than that in the first case so we could see the thick part is from
+// the load to the target place below the circle. However, in the first case, this
+// space is limited(small) so it prefer to going above the circle. That's why we
+// keep these two shapes.
+
+// But when we change the condition of left side, the two results are much more
+// similar: both below and above the circle.
+
+
+
+cout<<"Different shape:"<<endl;
+cout<<"1: a shape more similar to the ercercise; "<<endl;
+cout<<"2: a shape that taken from the original code;"<<endl;
+cin>>shape;
+if(shape==1)
+{
+  m=45;  //m<=45, anything bigger might cause a problem to the movemesh
+  xL = [0,0.85,1, 1, 0.25,0.25,0    ,0]*scale;
+  yL = [0,0   ,0,0.3,0.3 ,0.20,0.20 ,0.15]*scale;
+  labelL = [GammaF,GammaN,GammaD,GammaS,GammaF,GammaF,GammaF,GammaF];
+  //a more optimized mesh structure
+  numberL = m*[0.85*1.5,  0.15*2,0.3,0.75, 0.1*2, 0.25, 0.05,0.15];
+  R=0.05*scale;
+  c1=0.75*scale;
+  c2=0.1*scale;
+  b1=0; b2 =0.25*scale;b3=0.15*scale;b4=0.2*scale;
+  n1=m*0.25*scale*2;
+  n2=m*0.05*scale*2;
+  vertice1=[0,         0.15*scale];
+  vertice2=[0.25*scale,0.15*scale];
+  vertice3=[0.25*scale,0.2*scale];
+}
+else
+{
+  m=30;
+  xL = [-1,0.6,1, 1, -0.5,-0.5,-1    ,-1]*scale;
+  yL = [0, 0  ,0, 1, 1   , 0.7, 0.7 ,0.5]*scale;
+  labelL = [GammaF,GammaN,GammaD,GammaS,GammaF,GammaF,GammaF,GammaF];
+  numberL = m*[1.6,0.4,1,1.5,0.3,0.5, 0.2,0.5 ]*scale;
+  R=0.1;
+  c1=0.4;c2=0.3;
+  b1=-1; b2 =-0.5;b3=0.5;b4=0.7;
+
+  n1=m*0.5*scale;
+  n2=m*0.2*scale;
+  vertice1=[-1*scale,       0.5*scale ];
+  vertice2=[-0.5*scale,    0.5*scale];
+  vertice3=[-0.5*scale,0.7*scale];
+}
+
+// Here the function k = 1  b1<=x<=b2 and b3<=y<=b4 (the target space)
+//                   k = 0  if not
+func k = (x>=b1 && x<=b2)  && (y>=b3 && y<=b4);
+
+border bd1(t=vertice1[0],vertice2[0])       { x=t; y=vertice1[1];label=GammaF; };
+border bd2(t=vertice2[1],vertice3[1])       { x=vertice2[0]; y=t;label=GammaF; };
+border Circle(t=0,2*pi){
+   x = R*cos(t)+c1;
+   y = R*sin(t)+c2;
+   label = GammaD;
+}
+
+
+border Bbord(t=0,1; i){
+   int nexti = (i+1)%xL.n;
+   x = (1-t)*xL[i]+t*xL[nexti];
+   y = (1-t)*yL[i]+t*yL[nexti];
+   label = labelL[i];
+}
+///////////////////////
+// Building the mesh //
+///////////////////////
+mesh Th=buildmesh(Bbord(numberL)+Circle(-2*pi*R*2/scale*m)+ bd1(n1)+bd2(n2));
+plot(Th,wait=5);
+
+/////////////////////////////////////////////
+// Definition of the finite element spaces //
+/////////////////////////////////////////////
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s],[uold,vold];
+Vh2 [p1,p2];
+Vh0 h,hold,density,gradient;
+
+h = h0 ;
+///////////////////////
+// Elasticity system //
+///////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//  definition of macro e
+macro div(u,v) (dx(u)+dy(v))//                    definition of macro div
+
+
+//////////////////////////////
+// The problem of elasticity//
+//////////////////////////////
+
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+              +h*lambda*div(u,v)*div(w,s))
+    -int1d(Th,GammaN)(g1*w+g2*s)
+    +on(GammaD,u=0)
+    +on(GammaD,v=0)
+    +on(GammaS,v=0)
+;
+
+////////////////////
+// Initial volume //
+////////////////////
+volume0=int2d(Th)(hmoy);
+elasticity;
+cout<<" Volume: "<<volume0<<endl;
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+real coef = 0.05*scale;
+plot(h,fill=1,wait=0,cmm="Plot the density h");
+mesh Dh = movemesh (Th,[x+coef*u,y+coef*v]);
+plot(Dh,wait=0,cmm="Plot of the deformed mesh");
+
+
+
+real objectif=int2d(Th)(k*((u-uo)^2+(v-vo)^2));
+real objectifold;
+cout<<"Initialization. Objective: "<<objectif<<" Volume: "<<volume0<<endl;
+
+//////////////////
+//Adjoint state///
+//////////////////
+
+// We have that the Lagrangian is:
+// L(h,[u,v],[p1,p2]) = int2d(Th)(k*((u-uo)^2+(v-vo)^2))
+//           +int2d(Th)(2.*mu*h*e(u,v)'*e(p1,p2)+h*lambda*div(u,v)*div(p1,p2))
+//           -int1d(Th,GammaN)(g1*p1+g2*p2)
+
+// so we can calculate the three derives
+
+problem adjoint([p1,p2],[w,s]) =
+    int2d(Th)(2*k*((u-uo)*w +(v-vo)*s))
+   +int2d(Th)(2.*mu*h*e(w,s)'*e(p1,p2)
+             +h*lambda*div(w,s)*div(p1,p2))
+   +on(GammaD,p1=0)
+   +on(GammaD,p2=0)
+   +on(GammaS,p2=0)
+;
+adjoint;
+
+
+gradient =2.*mu*e(u,v)'*e(p1,p2)+lambda*div(u,v)*div(p1,p2);
+real norgrad=int2d(Th)(gradient*gradient);
+norgrad=sqrt(norgrad) ;
+cout << "Gradient: " << norgrad   << endl ;
+real step=0.1;
+real eps =1e-6;
+step=step/(norgrad+eps) ;
+cout << "First step "<< step << endl;
+
+
+// Macro for truncation
+macro trunc(h,mm,MM) min(max(h,mm),MM)// END of macro
+// Macro for projection on the integral constraint
+macro proj(h,havg,Vh) {
+   h  = trunc(h,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(h);
+   real tmin = hmin-h[].max,tmax = hmax-h[].min;
+   while(tmax-tmin>TOL||abs(v0-havg)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testh = trunc(tmid+h,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testh);
+     if(v0<h0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+   }
+   h = trunc(h+tmin,hmin,hmax);
+}// END of macro
+
+
+////////////////////////////////
+//     Optimisation loop      //
+////////////////////////////////
+real[int] vals(niter);
+
+int iter;
+for (iter=1;iter<=niter;iter=iter+1)
+{
+  cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+  hold = h ;
+  objectifold = objectif ;
+  [uold, vold] =[u,v];
+
+  h = hold - step*gradient;
+  proj(h,hmoy,Vh0);
+
+  elasticity;
+
+  //Compute the objective function
+  objectif=int2d(Th)(k*((u-uo)^2+(v-vo)^2));
+  vals[iter-1] = objectif;
+  lagrange=int2d(Th)(k*((u-uo)^2+(v-vo)^2))+int2d(Th)(2.*mu*h*e(u,v)'*e(p1,p2)
+            +h*lambda*div(u,v)*div(p1,p2))-int1d(Th,GammaN)(g1*p1+g2*p2);
+
+  cout<<"objectif: "<<objectif<<endl;
+  cout<<" Volume: "<<volume<<" Lagrange: "<<lagrange<<endl;
+
+  if (objectif > objectifold*1.00001 )
+  {
+    // if we do not descent we refuse the step,
+    // the step is too large
+    step = step / 2. ;
+    cout << "Reject: new step=" << step << endl ;
+    // we come back to the last value.
+    h=hold ;
+    [u,v] = [uold, vold];
+    objectif = objectifold ;
+  }
+  else{
+    // the objectif reduces and we increase a little our step
+    step = step * 1.1 ;
+    cout << "New step=" << step << endl ;
+    //  We recompute the gradient using the adjoint method //
+    adjoint ;
+    gradient = 2.*mu*e(u,v)'*e(p1,p2)+lambda*div(u,v)*div(p1,p2);
+  };
+  //////////////////////////////////////////////
+  // Plot the thickness of the current design //
+  //////////////////////////////////////////////
+  volume = int2d(Th)(h);
+  caption="Iteration "+iter+", Volume="+volume;
+  plot(Th,h,fill=1,value=true,viso=vviso,cmm=caption,wait=0);
+
+
+  /////////////////////
+  // End of the loop //
+  /////////////////////
+};
+
+//Plot the final design
+caption="Final design, Iteration "+iter+", Volume="+volume;
+plot(Th,h,wait=1,fill=1,value=1,viso=vviso,cmm=caption);
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+
+//we make the movement of target space more evident
+
+real exag1=(1-coef*1.5)/5;   //the coefficient that amplifies the movement of the target space.
+real exag2=coef;
+Dh = movemesh (Th,[x+exag1*k*u+exag2*u,y+exag1*k*v+exag2*v]);
+plot(Dh,wait=1);
+//////////////////////////////////
+// Plot of the objectif Evolution //
+//////////////////////////////////
+real[int] dis = 1:niter;
+plot([dis,vals],wait=1,cmm="Evolution of the objective function");

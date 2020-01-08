@@ -1,0 +1,114 @@
+// Example of usage of FreeFem++
+
+real r,r2;   // definition of radii as reals
+int n,n2;    // some integers for specifiing the number of points
+             // on borders
+real alpha;  // other parameters
+real k1,k2;
+
+// set parameters of the problem
+r=100;       
+r2=20;
+n=50;
+n2=20;
+alpha =2;
+k1=1;
+k2=1.e6;
+
+// define borders in a parametric way
+
+border gamma(t=0,2.*pi){ // parameter t varying in an interval
+       x = r*cos(t);   // formula for the x coordinate
+       y = r*sin(t);   // formula for the y coordinate
+       label=0;        // label - useful for boundary conditions
+ }  //parametrization of the border of gamma 
+border gamma2(t=0,2.*pi){
+       x = r2*cos(t);
+       y=r2*sin(t);
+       label=2;
+}   //parametrization of the border of gamma2 
+
+// construct mesh from borders using the command buildmesh
+mesh Th = buildmesh(gamma(n) + gamma2(n2)) ;
+plot(Th, wait=1, cmm="Omega with mesh Th");
+
+// identify the region numbers associated by FreeFem++
+int Omega2 = Th(0,0).region; // region associated to (0,0)
+int Omega1 = Th(r,0).region; // region associated to (r,0)
+
+cout << "Freefem++ identifier for region Omega2 is " << Omega2 << endl;
+cout << "Freefem++ identifier for region Omega1 is " << Omega1 << endl;
+
+// define a finite element space on the mesh Th
+// the type of FE space can be P0,P0,P2 by default
+// other options are available for complex problems (see the manual)
+
+fespace Vh(Th,P1);  // define the FE space
+Vh u,v;             // define some FE functions
+
+u=0;                 
+u[][10] = 1;         // set one degree of Freedom to 1
+plot(Th,u,cmm="one hat function",wait=1); 
+                    // plot one elementary FE function
+
+// Multiple ways of solving a PDE in FreeFem++
+
+//OPTION NUMBER 1
+//solve with keyword problem
+problem Laplace(u,v) = 
+    int2d(Th,Omega1)(k1*(dx(u)*dx(v)+dy(u)*dy(v))) 
+   +int2d(Th,Omega2)(k2*(dx(u)*dx(v)+dy(u)*dy(v)))
+   +int1d(Th,0)(alpha*u*v)
+   -int2d(Th,Omega1)((x*y+1)*v)
+   -int1d(Th,0)(x*v); //define the problem
+
+Laplace; //solve the problem
+plot(u,cmm="solution of the problem",wait=1);
+
+
+//OPTION NUMBER 2
+//solve with keyword varf 
+//bilinear form : 
+varf bf(u,v) = 
+    int2d(Th,Omega1)(k1*(dx(u)*dx(v)+dy(u)*dy(v))) 
+   +int2d(Th,Omega2)(k2*(dx(u)*dx(v)+dy(u)*dy(v)))
+   +int1d(Th,0)(alpha*u*v); // Bilinear form
+matrix A;
+A = bf(Vh,Vh);              // construct the stiffness matrix
+set(A,solver=UMFPACK);      // set the solver for solving the system
+
+varf Lf(u,v) = 
+   int2d(Th,Omega1)((x*y+1)*v)
+  +int1d(Th,0)(x*v); //Linear form
+
+real[int] b  = Lf(0,Vh);  //real[int] defines a vector of reals in C++
+
+u[] = A^-1*b;
+//  u[] is the vector of entries of finite element function u in the FE basis 
+// Note that FreeFem does not really compute the inverse A^-1. It solves the system A*u[] = b
+plot(u,cmm="solution of the problem... again",wait=1);
+
+//OPTION NUMBER 3
+//solve with keyword varf using only one variational formulation
+varf vf(u,v) = 
+    int2d(Th,Omega1)(k1*(dx(u)*dx(v)+dy(u)*dy(v))) 
+   +int2d(Th,Omega2)(k2*(dx(u)*dx(v)+dy(u)*dy(v)))
+   +int1d(Th,0)(alpha*u*v)
+   +int2d(Th,Omega1)((x*y+1)*v)
+   +int1d(Th,0)(x*v); //Bilinear + Linear form 
+matrix A2;
+A2 = vf(Vh,Vh); //stiffness matrix
+set(A2,solver=UMFPACK);
+real[int] b2  = vf(0,Vh);  
+        // note that setting the first variable to 0 leaves only
+        // the terms in the linear form
+
+u[] = A2^-1*b2;
+//u[] is the vector of entries of finite element function u in the FE basis  
+plot(u,cmm="solution of the problem... again... and again",wait=1);
+cout << "number of degrees of freedom: " << Vh.ndof << endl;
+cout << "size of A: " << A.n << endl;
+
+
+
+

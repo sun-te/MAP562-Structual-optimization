@@ -1,0 +1,146 @@
+real R = 2;
+real r = 0.3;
+real TOL = 1e-6;
+
+real hmin = 0.1;
+real hmax = 1;
+real h0   = 0.5;
+
+real alpha = 1;
+
+int maxiter = 30;
+int iter;
+verbosity = 0;
+
+real lag,lagmin,lagmax;
+real vol0=h0,vol;
+
+int NN = 20;
+
+real E=1;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+
+int GammaD = 0,GammaN = 1;
+
+border C1(t=0,2*pi){
+  x = R*cos(t);
+  y = R*sin(t);
+  label = GammaN;
+}
+
+border C2(t=0,2*pi){
+  x = r*cos(t);
+  y = r*sin(t);
+  label = GammaD;
+}
+
+
+mesh Th = buildmesh(C1(2*pi*NN*R)+C2(-2*pi*NN*r));
+plot(Th);
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s];
+Vh0 h,hold,density,newh;
+Vh0 Aeueu;
+
+
+
+
+h = 1+0.1*x^2;
+real avg = 1/Th.area*int2d(Th)(h);
+
+h = h-avg+h0;
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+             +h*lambda*div(u,v)*div(w,s))// bilinear part
+    -int1d(Th,GammaN)(alpha*(-N.y)*w+alpha*N.x*s)	          // forces; for bulk forces, add a volumic term
+    +on(GammaD,u=0,v=0); 
+
+
+elasticity;
+
+plot([u,v]);
+
+real compliance = int1d(Th,GammaN)(alpha*(-N.y)*u+alpha*N.x*v);
+
+cout << "Compliance: " << compliance << endl;
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+for(iter=1;iter<maxiter;iter++){
+
+  Aeueu = h^2*(2*mu*e(u,v)'*e(u,v)+lambda*div(u,v)*div(u,v));
+
+  // upper bound lagmax
+  lagmax = Aeueu[].max/hmin^2;
+  newh = trunc(sqrt(1/lagmax*Aeueu),hmin,hmax);
+  /*vol = vol0-1;
+  while(vol<vol0){
+    lag = lagmax/2;
+    newh = trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+    vol  = 1/Th.area*int2d(Th)(newh);
+    if(vol<vol0){lagmax=lagmax/2;}
+    else{break;}
+  }*/
+  cout <<"Lagmax: " << lagmax << "  Min: " << newh[].min << "   Max: " << newh[].max << endl;
+
+  // lower bound lagmin
+  lagmin = Aeueu[].min/hmax^2;
+  newh = trunc(sqrt(1/lagmin*Aeueu),hmin,hmax);
+  /*vol = vol0+1;
+  while(vol>vol0){
+    lag = lagmin*2;
+    newh = trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+    vol  = 1/Th.area*int2d(Th)(newh);
+    if(vol>vol0){lagmin=lagmin*2;}
+    else{break;}
+  }*/
+  cout <<"Lagmin: " << lagmin << " Min: " << newh[].min << "   Max: " << newh[].max << endl;
+
+  // dichotomy
+
+  while(abs(lagmax-lagmin)>TOL || abs(vol-vol0)>TOL){
+     lag = 0.5*(lagmax+lagmin);   // look at midpoint
+     newh =  trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+     vol = 1/Th.area*int2d(Th)(newh);
+     if(vol<vol0){
+        lagmax = lag;
+     }
+     else{
+        lagmin = lag;
+     }
+  }
+  hold = h;
+  h =  trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+  vol = 1/Th.area*int2d(Th)(h);
+  //lagmin = Aeueu[].
+
+  elasticity;
+  compliance = int1d(Th,GammaN)(alpha*(-N.y)*u+alpha*N.x*v);  
+
+  cout << "Iteration #" << iter << " | Compliance " << compliance << "   Vol frac. " << vol << endl;
+  //exit(0);
+
+  plot(h,fill=1,value=1,wait=0);
+
+  // stopping criterion
+  Vh0 diff = abs(h-hold);
+  if(diff[].max<h[].max*TOL){break;}
+
+}
+
+
+

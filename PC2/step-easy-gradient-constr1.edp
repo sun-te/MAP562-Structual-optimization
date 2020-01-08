@@ -1,0 +1,99 @@
+// MAP 562 (G. Allaire, B. Bogosel)
+// Jan 16, 2019
+//
+// TD 2
+// Exercise 2
+//***************************************
+// Constraint on the integral
+// \int u = u_0 *|\Omega|
+//***************************************
+// Task 1: Run the program
+// Task 2: Understand how the derivative dJ is obtained (recall the
+//   theoretical exercise)
+// Task 3: Change the step-size -> How many (gradient) iterations to you observe ?
+// Task 4: Change the lower tolerance to stop the gradient algorithm
+
+int N=100;	// Nb of edges on the boundary
+
+// Define the tolerance at which we want to stop
+// the calculation
+real lowertolerance =1.e-4;
+
+real constr1Target = 1;// constraint target
+
+// Define the polynomial degree
+macro vh() P1 //
+
+// Define the mesh and boundaries
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+fespace Vh(Th,vh);
+
+// The solution u^{k} is denoted by u
+Vh du,f=sqrt((x-0.5)^2+(y-0.5)^2)-0.2,u;
+
+// Initialize the initial guess u^0 as zero
+u = 0;
+
+// Implement the functional given in the exercise
+macro J(u) int2d(Th)(0.25*u^4-f*u)  //
+
+Vh error;
+
+// Solution loop
+real gradnorm = 1e+10;
+real stepsize = 0.1;
+
+real AreaOmega = Th.area; //自动求积分
+real constr1 = 1/AreaOmega*int2d(Th)(u);
+
+// project on the constraint
+//去掉了原来的平均值，然加了一个想要的target constraint
+u = u+constr1Target-constr1;
+
+// Counter of the number of gradient steps
+int i=0;
+
+// Final loop
+while(gradnorm > lowertolerance)
+{
+        // Compute the descent direction given by the gradient
+	du = u^3-f;
+
+        // project gradient on zero average
+        //计算gradient的积分（均值）
+        real avgGrad = 1/AreaOmega*int2d(Th)(du);
+        du = du-avgGrad;
+
+	// Compute new iterate u^{k+1}
+	u = u - stepsize * du;
+
+        // Check the projected function
+        constr1 = 1/AreaOmega*int2d(Th)(u);
+
+	// Compute the norm of the updates, which is
+	// used as criterion to stop the final loop.
+	// This criterion is reasonable since the updates du should
+	// tend to zero while approaching the
+	// optimal solution u^*
+        gradnorm = sqrt(int2d(Th)(du*du));
+
+        error = abs(u^3-f);
+
+	// Evaluate the sought functional value
+	real functional = J(u);
+
+	// Output on the terminal and visualization
+	cout<<"#"<<i<<" J="<<functional << " Norm of du:  "
+            << gradnorm << " Constraint:  " << constr1 << endl;
+	plot(u,cmm="#"+i+" J="+functional,wait=0,fill=1);
+
+	// Increment counter
+	i++;
+}

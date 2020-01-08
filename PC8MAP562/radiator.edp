@@ -1,0 +1,252 @@
+// Optimal radiator                  //
+//                                   //
+// Ecole Polytechnique, MAP 562      //
+// Copyright G. Allaire, 2004        //
+// 	     		 	     //
+// modified by T. Wick, N. Spillane, B. Bogosel  //
+
+
+//Problem parameters
+int niter=100;			// Number of total iterations
+int npen= 30;			// Starting iterations without penalization
+int n=5;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume
+real lagmin, lagmax ;		// Lower and upper bounds of the Lagrange multiplier
+int inddico ;	    		// Counter of iterations of the dichonomy problem
+real objectivefct;		// Objective function
+real volume0;			// Initial volume
+real volume,volume1;		// Current volume
+
+// Some output commands
+string caption;			// caption for graphical outputs
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+
+// applied forces on the top boundary
+func g=1;  			// Temperature flux
+
+
+/////////////////////////////////
+// Defining the two phases
+// and the characteristic function theta
+/////////////////////////////////
+real alpha=1;
+real beta=10;
+func theta0=(x>0.1)*(x<0.9)*(y<0.9) ;
+
+
+
+//////////////////////////////// 	1:Dirichlet condition
+// Definition of the domain   // 	2:Neumann condition
+//////////////////////////////// 	3:Non-homogen. Neumann (temp. flux)
+mesh Th ;
+
+int GammaD=1,GammaN=2,Gamma=3;
+
+border bd(t=0,1)   { x=1; y=t;label=Gamma; };     // Right boundary
+border bg(t=1,0)   { x=0; y=t;label=Gamma; };     // Left boundary
+border bs(t=1,0)   { x=t; y=1;label=GammaN; };     // Top boundary
+border b1(t=0,0.1)   { x=t; y=0;label=GammaD; };   // Bottom boundary
+border b2(t=0.1,0.9)   { x=t; y=0;label=Gamma; }; // Inner boundary
+border b3(t=0.9,1)   { x=t; y=0;label=GammaD; };   // Inner boundary
+
+
+//////////////////////////////
+// Construction of the mesh //
+//////////////////////////////
+Th= buildmesh (bd(10*n)+bs(10*n)+bg(10*n)+b1(1*n)+b2(8*n)+b3(1*n));
+plot(Th,wait=0);
+
+
+//////////////////////////////////
+// Defining the finite elements //
+//////////////////////////////////
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,P2);
+
+// Solution variable: T
+// Test function: v
+Vh2 T,v;
+
+// P0-space (constants) for
+// the characteristic functions
+// and the density (similar to geometric optimization)
+Vh0 theta,density, thetb,A,tau;
+
+
+////////////////////////////////////
+// Proportions of the two phases  //
+////////////////////////////////////
+theta = theta0;//1-0.280379;//theta0 ;
+thetb = 1-theta ;
+
+
+///////////////////////////////
+// Implementation of the PDE //
+///////////////////////////////
+
+macro grad(u) [dx(u),dy(u)]//
+
+problem conduction(T,v) =
+    int2d(Th)(A*(grad(T)'*grad(v)))
+   -int1d(Th,GammaN)(g*v)
+    +on(GammaD,T=0)
+;
+
+////////////////////////////////
+// In the following, we perform
+// the initialization of the
+// volume and the objective function
+////////////////////////////////
+
+// Initial volume
+volume0=int2d(Th)(1-theta);
+
+// Solve once the PDE in order
+// to get the initial temperature field.
+// This temperature is then used
+// to initialize the objective function.
+A= (alpha*theta+beta*(1-theta));
+conduction;
+
+// Compute the objective function
+objectivefct = int1d(Th,GammaN)(g*T);
+cout<<"Initialization. Objective fct = "<<objectivefct<<" Volume = "<<volume0<<endl;
+
+
+// Update the thetb (phase 2)
+thetb=1-theta ;
+
+// Visualization
+int iter;
+iter=0;
+caption="Iteration "+iter+", Objective fct= "+objectivefct+", Volume="+volume0;
+plot(Th,thetb,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+
+// Optimization loop		 //
+
+real[int] vals(niter);
+vals[0] = objectivefct;
+for (iter=1;iter< niter;iter=iter+1)
+{
+    cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+    // Computing the energy density
+    tau = (((alpha*theta + beta*(1-theta)))^2) * (dx(T)^2+dy(T)^2);
+
+    // Update the proportions of the two phases and
+    // project them onto their limit values if necessary
+    // why we have this formular
+    // \min_{\theta} \min_{-div(J)=0} \int A^{-1}|J|^2 = min_{\theta, J} \int A^{-1} |J|^2
+    // J(\theta) =\int_{\Omega} [\alpha \theta +\beta (1-\theta)]^{-1} |J|^2 +l \int_{\Omega} \theta
+    // J'(\theta)(\phi) =\int_{\Omega}\frac{-(\alpha -\beta) \phi}{(\alpha \theta + \beta (1-\theta))^2} +l \int_{\Omega} \theta=0 \forall \Phi
+    // \frac{\beta-\alpha}{\alpha \theta + \beta (1-\theta)} |J|^2 =-l
+    // \leftarrow \sqrt(\frac{(\beta-\alpha)|J|^2}{-l})= \theta(\alpha-\beta) +\beta
+    // \theta =\frac{l}{\beta - \alpha }(\beta -\sqrt(\frac{(\beta-\alpha)|J|^2}{-l}))
+    theta = ( beta - sqrt(tau*(beta-alpha)/(lagrange)) )/(beta-alpha);
+    theta = min(theta,1) ;
+    theta = max(theta,0) ;
+
+    // Apply penalization (slide 67 in lecture chapter7.pdf), once
+    // the "initial" number of iterations has been exceeded.
+    if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+
+
+    // Similar to geometric optimization,
+    // we calculate the Lagrange multiplier
+    // and make sure that it stays within
+    // its bounds.
+    volume=int2d(Th)(1-theta);
+    volume1 = volume ;
+
+    if (volume1 < volume0)
+    {
+       lagmin = lagrange ;
+       while (volume < volume0)
+       {
+          lagrange = lagrange/2 ;
+          theta = ( beta - sqrt(tau*(beta-alpha)/(lagrange)) )/(beta-alpha);
+          theta = min(theta,1) ;
+          theta = max(theta,0) ;
+
+          if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+             volume=int2d(Th)(1-theta) ;
+       };
+       lagmax = lagrange ;
+    };
+
+    if (volume1 > volume0)
+    {
+       lagmax = lagrange ;
+       while (volume > volume0)
+       {
+          lagrange = 2*lagrange ;
+          theta = ( beta - sqrt(tau*(beta-alpha)/(lagrange)) )/(beta-alpha);
+          theta = min(theta,1) ;
+          theta = max(theta,0) ;
+
+          if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+          //penalization
+             volume=int2d(Th)(1-theta) ;
+       };
+       lagmin = lagrange ;
+    };
+
+    if (volume1 == volume0)
+    {
+       lagmin = lagrange ;
+       lagmax = lagrange ;
+    };
+
+    // Solving the dichonomy problem
+    // to compute a Lagrange multiplier
+    // in order to enforce the volume
+    // constraint (see chapter5.pdf)
+    inddico=0;
+    while ((abs(1.-volume/volume0)) > 0.000001)
+    {
+       lagrange = (lagmax+lagmin)*0.5 ;
+       theta = ( beta - sqrt(tau*(beta-alpha)/(lagrange)) )/(beta-alpha);
+       theta = min(theta,1); theta = max(theta,0);
+       if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+          volume=int2d(Th)(1-theta) ;
+          inddico=inddico+1;
+          if (volume < volume0)
+             {lagmin = lagrange ;} ;
+          if (volume > volume0)
+             {lagmax = lagrange ;} ;
+    };
+
+    //cout<<"Number of iteration of the dichonomy problem: "<<inddico<<endl;
+
+
+    // After having computed all constraints
+    // and the proportions of the two phases, we
+    // solve the PDE (i.e., the thermal problem)
+    A =(alpha*theta+beta*(1-theta));
+    conduction;
+    //plot(T,wait=1);
+
+    // Evaluate the cost functional
+    objectivefct=int1d(Th,GammaN)(g*T);
+    vals[iter] = objectivefct;
+    cout<<"Objective fct: "<<objectivefct<<" Volume: "<<volume<<" Lagrange: "<<lagrange<<endl;
+
+    // Finally we update the proportion
+    thetb=1-theta;
+    caption="Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+    plot(thetb,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+}; // end of the optimization loop
+
+
+// Final updates and visualization
+thetb=1-theta ;
+
+caption="Final Shape, Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+plot(Th,thetb,fill=1,viso=vviso,cmm=caption);
+
+real[int] dis(niter);
+dis = 1:niter;
+plot([dis,vals],cmm="Cost function evolution");

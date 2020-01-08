@@ -1,0 +1,19 @@
+// Show finite element basis functions 
+// associated to each degree of freedom
+
+mesh Sh=square(5,5); // mesh definition
+macro Pk() P2        // type of finite elements
+//二阶fonction base
+
+fespace Vh(Sh,Pk);   // define the finite element space 
+Vh u=0;              // define a finite element function
+
+real[int] colorhsv=[ 4./6., 1 , 0.5, 4./6., 1 , 1, 5./6., 1 , 1, 1, 1. , 1, 1, 0.5 , 1 ];  // example of defining a colormap
+
+for(int i=0;i<Vh.ndof;i++)
+{
+	u[](i)=1;  // the i-th degree of freedom is 1, the rest are 0
+	plot(Sh,u,wait=1,cmm="degree of freedom "+i+"/"+Vh.ndof,hsv=colorhsv);  
+                   // plot the associated finite element basis function
+	u[](i)=0;  // reset the i-th degree of freedom to 0
+}

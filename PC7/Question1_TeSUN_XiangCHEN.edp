@@ -1,0 +1,211 @@
+/* Geometric optimization of the shape of a cantilever */
+
+/*
+This is about the first question in the homework sheet:
+
+Implement an optimization algorithm and show the result obtained when the initial hole is a disk
+and the Dirichlet boundary condition T = T1 is imposed on @!. What happens when considering
+multiple inclusions? (starting from two disks, for example) You may use the following values for
+the constants in the problem:
+
+u=(0,1);  T1=100;   T0=20;
+*/
+load "medit"
+
+verbosity = 0;
+
+int Gamma=0,GammaD=1;
+
+/* Border of the initial domain */
+border left1(t=0.0,1.0){x = 0.0; y = 1.0-t; label = GammaD;};
+border left2(t=0.0,1.0){x = 1.0-t; y = 2.0-t; label = GammaD;};
+border bottom(t=0.0,2.0){x=t; y=0.0; label=GammaD;};
+border right1(t=0.0,1){x = 2.0; y = t; label = GammaD;};
+border right2(t=0.0,1){x = 2.0-t; y = 1.0+t; label = GammaD;};
+border h1 (t=0.0,2.0*pi){x=0.7+0.2*cos(t); y=0.5+0.2*sin(t); label=Gamma;};
+border h2 (t=0.0,2.0*pi){x=1.3+0.2*cos(t); y=0.5+0.2*sin(t); label=Gamma;};
+border h3 (t=0.0,2.0*pi){x=1+0.1*cos(t); y=0.3+0.1*sin(t); label=Gamma;};
+/* Create, then display initial mesh */
+int m=15;
+mesh Th = buildmesh( left1(m) + left2(m*sqrt(2))
+          + bottom(2*m) + right1(m) + right2(m*sqrt(2))
+          +h1(-m*0.6*pi)
+          +h2(-m*0.6*pi)
+          +h3(-m*0.6*pi));
+
+plot(Th,wait=0);
+
+/* Parameters */
+real eps = 1.e-6;
+real cply = 0.0;
+real obj = 0.0,newobj = 0.0;
+mesh Dh;
+int nit = 200;
+
+real gmax;
+real coef = 0.1;
+real coefmax = 0.2;
+real coefmin = 0.01;
+real step;
+real chkvoltri;
+real epsvoltri = 1.e-6;
+real tol = 0.01;
+real tgv = 1.e10;
+real vol = 0.0;
+real ell = 5.0;
+string s;
+
+
+real u1=0;
+real u2=0;
+real T1=100;
+real T0=20;
+
+/* Finite element spaces: P1 elements for the resolution of the linearized elasticity system */
+fespace Vh(Th,P1);
+fespace Vh0(Th,P0);
+
+/* Functions */
+Vh   vx,vy,grx,gry,ng,uox,uoy,chidir;
+Vh0  gr0;
+Vh T,Q,Phi,Psi,Told,Qold;
+
+
+Vh0 hMax = hTriangle; // get sizes of all triangles
+real meshsiz = hMax[].max; // get maximal triangle size
+real alpha = (2.0*meshsiz)^2; //regularization parameter
+
+macro div(ux,uy) (dx(ux)+dy(uy))//
+real sqrt2 = sqrt(2);
+macro e(ux,uy) [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]//
+macro grad(u) [dx(u),dy(u)]//
+macro grad2(ux,uy) [dx(ux),dy(ux),dx(uy),dy(uy)]//
+
+
+problem temp(T,Phi)=
+  int2d(Th)( grad(T)'*grad(Phi)  +[u1,u2]'*grad(T)*Phi )
+  -int1d(Th,Gamma)(grad(T)'*[N.x,N.y]*Phi)
+//  -int1d(Th,GammaD)(grad(T)'*[N.x,N.y]*Phi)
+  +on(GammaD,T=0)
+  +on(Gamma, T=T1);
+
+
+problem adjoint(Q,Psi)=
+  int2d(Th)(2*(T-T0)*Psi )
+  -int2d(Th)([u1,u2]'*grad(Q)*Psi)
+  +int2d(Th)(grad(Psi)'*grad(Q))
+  +on(GammaD,Gamma,Q=0);
+
+
+
+func real locdir() {
+  if  ( y < 0.05 ) return(0);
+  else return(0.0);
+}
+chidir = locdir();
+
+/* Tangential derivative */
+macro Dt(u) [dx(u)-(dx(u)*N.x+dy(u)*N.y)*N.x,dy(u)-(dx(u)*N.x+dy(u)*N.y)*N.y] // EOM
+//Three Extension possible defination
+
+/* Extension / regularization problem */
+//grx: Deformation
+
+problem velext2([grx,gry],[vx,vy],solver=Crout) =
+  //regularization, to avoid an external hole
+  //if we delete this term, the mesh will move creazily
+  int2d(Th)(grad2(grx,gry)'*grad2(vx,vy) //full gradient shape= 1*4
+//  + int1d(Th,omega)( alpha*(Dt(grx)'*Dt(vx) + Dt(gry)'*Dt(vy)) )
+ + (1.0+chidir*tgv)*(grx*vx+gry*vy) )
+  - int1d(Th,Gamma)( gr0*(N.x*vx+N.y*vy) )
+  + on(GammaD,grx=0.0,gry=0.0);
+
+// /* Objective function */
+macro J() ( int2d(Th)((T-T0)^2)) // EOM
+
+///  int1d(Th,GammaN)(Aeueu(ux,uy))  compliance...
+
+/* (Negative) shape gradient of J */
+macro dJ() {
+  gr0 = -((T-T0)^2 -grad(T)'*[N.x,N.y]*grad(Q)'*[N.x,N.y]) -ell;
+  velext2;
+} // EOM
+//
+// /* Initialization */
+temp;
+adjoint;
+plot(T,fill=1);
+plot(Q,fill=1);
+
+/* Initial value of the objective function */
+vol     = Th.area;
+//A constraint on the volume of the hole
+//since the volume of the whole domain equals to 3, and 3-Th.area is the volume of the hole.
+obj     = J + ell*(3-vol);
+real[int] vals(nit);
+/* Main optimization loop */
+for(int n=0; n<nit; n++){
+
+  /* Computation of the shape gradient as a P1 function and size of the time step */
+  dJ;
+  ng = sqrt(grx*grx+gry*gry);    //normal of the gradient
+  gmax = ng[].max;               //maximal
+  step = coef*meshsiz / (eps^2+gmax); //CFL condition,the movement is no larger than the size
+  /* Attempt motion of the mesh: if the moved mesh has an almost null or flipped element, restart the operation with a smaller step */
+  chkvoltri = checkmovemesh(Th,[x+step*grx,y+step*gry]); //check, give the samllest surface
+
+  if( chkvoltri < epsvoltri ) { //potential to inverse the triangle
+    cout<<"Iteration "<<n<<" rejected; inverted triangle."<<endl;
+    coef *= 0.5;
+    vals[n]=obj;
+    continue;
+  }
+
+  /* Else, effectively move the new mesh */
+    Dh = movemesh(Th,[x+step*grx,y+step*gry]);
+
+  /* Resolution of the state equation */
+  Told=T;
+  Qold=Q;
+  temp;
+  adjoint;
+
+  /* Evaluation of the new objective function */
+  vol    = Th.area;
+  newobj = J + ell*(3-vol); //compute the new objective function
+  vals[n]=obj;
+  /* Decision */
+  if( newobj < obj+tol*abs(obj) || coef <= coefmin ) {
+    cout<<"Iteration "<<n<<" accepted; objective: "<<obj<<" ---> "<<newobj<<endl;
+    cout<<"Volume: " << vol << endl;
+    obj   = newobj;
+    coef  = min(coefmax,1.02*coef);
+    Th    = Dh;
+
+    /* Adapt the mesh to the current solution of the elasticity system */
+    //update the mesh to suit better for ux,uy,
+    //hmin, hmax, size of the triangle min and max
+    //let the thin part be possible to mesh
+    Th = adaptmesh(Th,T,hmin=0.01,hmax=0.1);
+
+    hMax = hTriangle; // get sizes of all triangles, P0 function
+    meshsiz = hMax[].max; // get maximal triangle size
+    cout << meshsiz << endl;
+    alpha = (2.0*meshsiz)^2;
+    //chidir = locdir();
+    //plot(Th,wait=0);
+    plot(T,fill=1,wait=0);
+  }
+  else { //if the objective function doesn't decrease..
+    cout<<"Iteration "<<n<<" rejected; objective: "<<obj<<" v.s. "<<newobj<<endl;
+    coef  = max(coefmin,0.6*coef);
+    T=Told;
+    Q=Qold;
+  }
+
+}
+real[int] dis = 1:vals.n;
+plot([dis,vals],wait=1,cmm="Evoluion of cost function");
+/* Print mesh and solution */
+//savemesh(Th,"Cantilever.mesh");
+//savesol("Cantilever.sol",Th,[ux,uy]);

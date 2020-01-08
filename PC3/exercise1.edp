@@ -1,0 +1,111 @@
+// Construct a domain Omega
+// with an inclusion omega
+
+// In this example two disks are considered for simplicity
+real R = 2;  // first radius
+real r = 0.5;// second radius
+
+int N = 10;  // Number of points on boundary
+
+border C1(t=0,2*pi){
+   x = r*cos(t);
+   y = r*sin(t);
+   label = 1;
+}
+
+border C2(t=0,2*pi){
+   x = R*cos(t);
+   y = R*sin(t);
+   label = 2;
+}
+
+// build the mesh
+mesh Th = buildmesh(C2(2*pi*R*N)+C1(2*pi*r*N));
+
+// get region numbers
+int Omega1 = Th(0,0).region;
+int Omega2 = Th(0,0.5*(R+r)).region;
+
+// Finite element spaces
+fespace Vh(Th,P1);
+
+// define the constant u in the problem
+real u = 1;
+
+// finite element function for the temperature and
+// test function
+Vh T,phi;
+Vh T0 = 1; // finite element function for target temperature
+
+macro grad(u) [dx(u),dy(u)] //  macro for gradient
+
+// PDE for temperature
+problem Temp(T,phi) =
+   int2d(Th)(grad(T)'*grad(phi))
+  -int2d(Th,Omega1)(u*phi)
+  +on(2,T=0);
+
+// Compute the derivative
+u = 1;
+Temp;
+
+plot(T,fill=1,value = 1);
+
+// Store it for further use
+Vh T1 = T; // solution with u=1 gives derivative
+
+// variable to store the value
+real val;
+
+// compute the objective function and store it in val
+macro J(u) {
+  T = u*T1;
+  val = int2d(Th)((T-T0)^2);
+} //
+
+J(u);
+
+// various parameters for the optimization
+real ngrad = 1e10;
+real TOL = 1e-6;
+real du;
+real stepsize = 0.1;
+int iter = 1;
+real oldval = val;
+real oldu = u;
+real maxstep = 0.1;
+ u = 20;
+
+// optimization loop
+while(ngrad>TOL){
+    du = int2d(Th)(2*(u*T1-T0)*T1); // compute gradient
+
+    u  = u-stepsize*du;       // update the variable 1
+                              // note that we are in 1D
+
+    J(u);                     // compute the new value
+
+    ngrad = abs(du);  // norm of gradient, just a scalar here
+
+    // decision: if we decrease the value increase stepsize
+    // else: do not advance and decrease the stepsize
+    //如果在下降那么就扩大step
+    //如果没有在下降那就缩短step
+    //因为一开始可能选的step不合理
+    if(val<oldval){
+    cout << "Iter " << iter << "  Val:  " << val << " ngrad: " << ngrad << " u= " << u << " step " << stepsize << endl;
+      stepsize = min(2*stepsize,maxstep);
+      oldu = u;
+      oldval = val;
+    }
+    else{
+      u = oldu;
+      stepsize = 0.5*stepsize;
+    }
+
+    iter++;   // increase iteration
+}
+
+// show the result
+T = u*T1;
+plot(T,fill=1,value=1,cmm="final temperature for u="+u);

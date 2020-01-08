@@ -1,0 +1,300 @@
+// Optimal radiator                  //
+//                                   //
+// Ecole Polytechnique, MAP 562      //
+// Copyright G. Allaire, 2004        //
+// 	     		 	     //
+// modified by T. Wick, N. Spillane, B. Bogosel  //
+
+
+//Problem parameters
+int niter=200;			// Number of total iterations
+int npen= 50;			// Starting iterations without penalization
+int n=4;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume
+real lagmin, lagmax ;		// Lower and upper bounds of the Lagrange multiplier
+int inddico ;	    		// Counter of iterations of the dichonomy problem
+real objectivefct;		// Objective function
+real volume0;			// Initial volume
+real volume,volume1;		// Current volume
+real maxstep = 0.1;
+
+real gx=0,gy=1;
+real g0x=0,g0y=1;
+real E=1;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+real p = 1;
+
+verbosity = 0;
+
+real hmin = 0.;
+real hmax = 1;
+real TOL = 1e-6;
+
+real step = 0.1;
+
+// Some output commands
+string caption;			// caption for graphical outputs
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+
+// applied forces on the top boundary
+func g=1;  			// Temperature flux
+
+
+/////////////////////////////////
+// Defining the two phases
+// and the characteristic function theta
+/////////////////////////////////
+real alpha=0.0001;
+real beta=1;
+func theta0=(x>0.1)*(x<0.9)*(y<0.9) ;
+
+
+
+//////////////////////////////// 	1:Dirichlet condition
+// Definition of the domain   // 	2:Neumann condition
+//////////////////////////////// 	3:Non-homogen. Neumann (temp. flux)
+mesh Th ;
+
+int GammaD=1,GammaN=2,Gamma=3,GammaZ=10;
+
+border bg(t=1,0)   { x=0; y=t;label=GammaD; };     // Left boundary
+border bd(t=0,2)   { x=t; y=0;label=Gamma; };   // Bottom boundary
+border r1(t=0,0.4) { x=2; y=t;label=Gamma; };   // Right 1
+border r2(t=0.4,0.6) { x=2; y=t;label=GammaN; };   // Right 2
+border r3(t=0.6,1) { x=2; y=t;label=Gamma; };   // Right 3
+border up(t=2,0){ x=t; y=1;label=Gamma; }; // Upper boundary
+
+
+//////////////////////////////
+// Construction of the mesh //
+//////////////////////////////
+
+real x0=0,x1=1;
+real y0=0,y1=0.45,y2=0.55,y3=1;
+
+int[int] l1=[Gamma,Gamma,GammaZ,GammaD];
+int[int] l2=[GammaZ,GammaN,GammaZ,GammaD];
+
+int[int] l3=[GammaZ,Gamma,Gamma,GammaD];
+
+mesh Th1=square((x1-x0)*10*n,4.5*n,[x0+(x1-x0)*x,y0+(y1-y0)*y],label=l1,flags=1);
+mesh Th2=square((x1-x0)*10*n,n,[x0+(x1-x0)*x,y1+(y2-y1)*y],label=l2,flags=1);
+mesh Th3=square((x1-x0)*10*n,4.5*n,[x0+(x1-x0)*x,y2+(y3-y2)*y],label=l3,flags=1);
+
+
+
+plot(Th3,wait=1);
+
+Th=Th1+Th2+Th3;
+plot(Th,wait=0);
+
+
+//////////////////////////////////
+// Defining the finite elements //
+//////////////////////////////////
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,P2);
+
+// Solution variable: T
+// Test function: v
+Vh2 u,v,w,s , q1,q2, xiang,te;
+
+// P0-space (constants) for
+// the characteristic functions
+// and the density (similar to geometric optimization)
+Vh0 theta,density, thetb,A,tau,gradient,thetaold;
+
+
+////////////////////////////////////
+// Proportions of the two phases  //
+////////////////////////////////////
+theta = 0.4;//1-theta0;//1-0.280379;//theta0 ;
+
+
+///////////////////////////////
+// Implementation of the PDE //
+///////////////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+
+macro grad(u) [dx(u),dy(u)]//
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(A*(2.*mu*e(u,v)'*e(w,s)
+             +lambda*div(u,v)*div(w,s)))
+   -int1d(Th,GammaN)(gx*w+gy*s)
+    +on(GammaD,u=0,v=0);
+problem adjoint([q1,q2],[te,xiang]) =
+    int2d(Th)(A*(2.*mu*e(q1,q2)'*e(te,xiang)
+             +lambda*div(q1,q2)*div(te,xiang)))
+    +int1d(Th,GammaN)(g0x*te+g0y*xiang)
+    +on(GammaD,q1=0,q2=0)
+;
+
+////////////////////////////////
+// In the following, we perform
+// the initialization of the
+// volume and the objective function
+////////////////////////////////
+
+// Initial volume
+volume0=int2d(Th)(theta);
+
+// Solve once the PDE in order
+// to get the initial temperature field.
+// This temperature is then used
+// to initialize the objective function.
+A= (alpha*(1-(theta)^p)+beta*(theta)^p);
+elasticity;
+adjoint;
+// Compute the objective function
+objectivefct = int1d(Th,GammaN)(g0x*u+g0y*v);
+cout<<"Initialization. Objective fct = "<<objectivefct<<" Volume = "<<volume0<<endl;
+
+
+// Update the thetb (phase 2)
+
+// Visualization
+int iter;
+iter=0;
+caption="Iteration "+iter+", Objective fct= "+objectivefct+", Volume="+volume0;
+plot(Th,theta,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+macro proj(u,u0,Vh) {
+   real tmin = hmin-u[].max,tmax = hmax+u[].min;
+   u  = trunc(u,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   while(tmax-tmin>TOL&&abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << " " << v0-u0 << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro
+
+
+
+// Optimization loop		 //
+
+real objold;
+Vh2 uold,vold;
+Vh2 q1old,q2old;
+real[int] vals(niter);
+vals[0] = objectivefct;
+int accept;
+for (iter=1;iter< niter;iter=iter+1)
+{
+    accept = 0;
+    cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+    uold = u;
+    vold = v;
+    q1old=q1;
+    q2old=q2;
+    objold = objectivefct;
+    thetaold = theta;
+
+    // Computing the energy density
+    gradient = p*(theta)^(p-1)*(beta-alpha)*
+             (2*mu*e(q1,q2)'*e(u,v)+lambda*div(q1,q2)*div(u,v));
+
+    // Update the proportions of the two phases and
+    // project them onto their limit values if necessary
+    theta = thetaold-step*gradient;
+
+    // Apply penalization (slide 67 in lecture chapter7.pdf), once
+    // the "initial" number of iterations has been exceeded.
+    //if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+
+
+    proj(theta,volume0/Th.area,Vh0);
+
+    if(iter==npen){
+      p = 2;accept=1;
+    }
+
+    if(iter==(npen+50)){
+      p = 2.5;accept=1;
+    }
+
+    if(iter==(npen+100)){
+      p = 3;accept=1;
+    }
+
+    // After having computed all constraints
+    // and the proportions of the two phases, we
+    // solve the PDE (i.e., the thermal problem)
+    A= (alpha*(1-(theta)^p)+beta*(theta)^p);
+    elasticity;
+    adjoint;
+    //plot(T,wait=1);
+
+    // Evaluate the cost functional
+    objectivefct=int1d(Th,GammaN)(g0x*u+g0y*v);
+    vals[iter] = objectivefct;
+    cout<<"Objective fct: "<<objectivefct<<" Volume: "<<volume <<endl;
+
+    if(objectivefct<objold*1.00001|| accept==1){
+       uold = u;
+       vold = v;
+       thetaold = theta;
+       objold = objectivefct;
+       step = 1.1*step;
+       step = min(step,maxstep);
+
+       // Finally we update the proportion
+       volume = int2d(Th)(theta);
+       caption="Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+       plot(theta,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+
+    }
+    else{
+       cout << "Reject " << endl;
+       iter = iter-1;
+       step = step/2;
+       u = uold;
+       v = vold;
+       q1 =q1old;
+       q2 =q2old;
+       theta = thetaold;
+    }
+
+    cout << "Step=" << step << endl;
+    cout << "Theta min=" << theta[].min << "Theta max=" << theta[].max << endl;
+}; // end of the optimization loop
+
+
+// Final updates and visualization
+
+caption="Final Shape, Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+plot(Th,theta,fill=1,viso=vviso,cmm=caption);
+
+real[int] dis(niter);
+dis = 1:niter;
+plot([dis,vals],cmm="Cost function evolution");

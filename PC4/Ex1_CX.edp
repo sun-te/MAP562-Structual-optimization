@@ -1,0 +1,305 @@
+// G. Allaire, B. Bogosel 2019
+// MAP562
+// Script containing the variational formulation of the elasticity
+// for the membrane case with coefficients depending on the thickness
+
+// You may start from this script to solve the Homework problems
+
+// Use ideas from the scripts presented in class, notably:
+
+// Preliminary: write the Lagrangian and find its partial derivatives
+// 1. Define the problem for the adjoint state
+// 2. Write the correct formula for the gradient (by direct identification in this case)
+// 3. Take the projection algorithm on the constraint from the
+//    codes shown in class
+//
+
+
+int niter=20;			// Number of iterations
+int n=2;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume constraint
+real lagmin, lagmax ;		// Bounds for the Lagrange multiplier
+int inddico ;
+real compliance;		// Compliance
+real volume0;			// Initial volume
+real volume,volume1;		// Volume of the current shape
+real exa=1;			// Coefficient for the shape deformation
+string caption;			// Caption for the graphics
+real E=100;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+func g1=0;  			// Applied forces
+func g2=100;
+
+int m=30;
+real scale=1;
+//target movement
+real uo=0.;
+real vo=1.;
+
+real TOL = 1e-5;
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+//////////////////////////////////////
+// Computation of Lame coefficients //
+//////////////////////////////////////
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+////////////////////////////////////////////////////
+// Lower and upper bounds for the plate thickness //
+////////////////////////////////////////////////////
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.5;
+func h0=hmoy ;
+
+/////////////////////// 			1:Dirichlet boundary condition
+// Domain definition // 			2:Neumann boundary or free boundary condition
+/////////////////////// 			3:Non-homogeneous Neumann or applied load
+
+
+
+int GammaD=0;
+int GammaN=1;
+int GammaS=3;
+int GammaF=4;
+int GammaI=5;
+
+//
+// real[int] xL = [0,0.85,1, 1, 0.25,0.25,0    ]*scale;
+// real[int] yL = [0,0   ,0,0.3,0.3 ,0.20,0.20 ]*scale;
+// int[int] labelL = [GammaF,GammaN,GammaD,GammaS,GammaF,GammaI,GammaD];
+// int[int] numberL = m*[0.85,0.15,0.3,0.75,0.1*3,3*0.25,0.20];
+
+real[int] xL = [-1,0.6,1, 1, -0.5,-0.5,-1    ]*scale;
+real[int] yL = [0, 0  ,0, 1, 1   , 0.7, 0.7 ]*scale;
+int[int] labelL = [GammaF,GammaN,GammaD,GammaS,GammaF,GammaI,GammaD];
+int[int] numberL = m*[1.6,0.4,1,1.5,0.3,0.5, 0.7 ];
+
+border Bbord(t=0,1; i){
+   int nexti = (i+1)%xL.n;
+   x = (1-t)*xL[i]+t*xL[nexti];
+   y = (1-t)*yL[i]+t*yL[nexti];
+   label = labelL[i];
+}
+//
+// real[int] xs = [0.1, 0.25,0.25, 0.1]*scale;
+// real[int] ys = [0.2,0.2,0.15,0.15]*scale;
+// int[int] labels = [GammaI,GammaI,GammaD,GammaF];
+// int[int] numbers = m*[0.05,0.25,0.05,0.25];
+// border Sbord(t=0,1; i){
+//    int nexti = (i+1)%xs.n;
+//    x = (1-t)*xs[i]+t*xs[nexti];
+//    y = (1-t)*ys[i]+t*ys[nexti];
+//    label = labels[i];
+// }
+// real R=0.05*scale;
+// border Circle(t=0,2*pi){
+//    x = R*cos(t)+0.75*scale;
+//    y = R*sin(t)+0.1*scale;
+//    label = GammaD;
+// }
+
+real R=0.1;
+border Circle(t=0,2*pi){
+   x = R*cos(t)+0.4;
+   y = R*sin(t)+0.3;
+   label = GammaD;
+}
+
+///////////////////////
+// Building the mesh //
+///////////////////////
+mesh Th=buildmesh(Bbord(numberL)+Circle(-2*pi*0.1*m));
+plot(Th,wait=0);
+//
+// /////////////////////////////////////////////
+// // Definition of the finite element spaces //
+// /////////////////////////////////////////////
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s],[uold,vold];
+Vh2 [p1,p2];
+Vh0 h,hold,density,gradient;
+
+h = h0 ;
+// ///////////////////////
+// // Elasticity system //
+// //////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+
+// //!!!!!
+// // The symmetry condition in elasticity!
+// //
+// // in order to impose a symmetry condition for the elasticity equation
+// // work on half the domain and impose that the displacement
+// // orthogonal to the symmetry axis is zero (as a Dirichlet boundary condition)
+
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+              +h*lambda*div(u,v)*div(w,s))// bilinear part
+    -int1d(Th,GammaN)(g1*w+g2*s)	          // forces; for bulk forces, add a volumic term
+    +on(GammaD,u=0)
+    +on(GammaD,v=0)                        // Dirichlet boundary conditions
+    +on(GammaS,v=0)
+;
+
+// ////////////////////
+// // Initial volume //
+// ////////////////////
+volume0=int2d(Th)(hmoy);
+
+////////////////////////
+// Initial compliance //
+////////////////////////
+elasticity;
+compliance=int1d(Th,GammaN)(g1*u+g2*v);
+cout<<"Initialization. Compliance: "<<compliance<<" Volume: "<<volume0<<endl;
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+real coef = 0.05;
+plot(h,fill=1,wait=0,cmm="Plot the density h");
+mesh Dh = movemesh (Th,[x+coef*u,y+coef*v]);
+plot(Dh,wait=0,cmm="Plot of the deformed mesh");
+
+
+//func k = (x>=0 && x<=0.25*scale)  && (y>=0.15*scale && y<=0.2*scale);
+func k=(x>=-1 && x <=-0.5) &&(y>=0.5 && y<=0.7);
+real objectif=int2d(Th)(k*((u-uo)^2+(v-vo)^2));
+real objectifold;
+cout<<"Initialization. Objective: "<<objectif<<" Volume: "<<volume0<<endl;
+
+/////////////////////////////////
+//Adjoint state/////////////////
+////////////////////////////////
+
+problem adjoint([p1,p2],[w,s]) =
+    int2d(Th)(2*k*((u-uo)*w +(v-vo)*s))
+   +int2d(Th)(2.*mu*h*e(w,s)'*e(p1,p2)
+             +h*lambda*div(w,s)*div(p1,p2))
+   +on(GammaD,p1=0)
+   +on(GammaD,p2=0)                        // Dirichlet boundary conditions
+   +on(GammaS,p2=0)
+;
+adjoint;
+
+
+gradient =2.*mu*e(u,v)'*e(p1,p2)+lambda*div(u,v)*div(p1,p2);
+real norgrad=int2d(Th)(gradient*gradient);
+norgrad=sqrt(norgrad) ;
+cout << "Gradient: " << norgrad   << endl ;
+real step=0.1;
+real eps =1e-6;
+step=step/(norgrad+eps) ;
+cout << "First step "<< step << endl;
+
+
+// Macro for truncation
+macro trunc(h,mm,MM) min(max(h,mm),MM)// END of macro
+// Macro for projection on the integral constraint
+macro proj(h,havg,Vh) {
+   h  = trunc(h,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(h);
+   real tmin = hmin-h[].max,tmax = hmax-h[].min;
+   while(tmax-tmin>TOL||abs(v0-havg)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testh = trunc(tmid+h,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testh);
+     if(v0<h0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+   }
+   h = trunc(h+tmin,hmin,hmax);
+}// END of macro
+////////////////////////////////
+//     Optimisation loop      //
+////////////////////////////////
+real[int] vals(niter);
+
+int iter;
+for (iter=1;iter<=niter;iter=iter+1)
+{
+  cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+  hold = h ;
+  objectifold = objectif ;
+  [uold, vold] =[u,v];
+
+  h = hold - step*gradient;
+  proj(h,hmoy,Vh0);
+
+  elasticity;
+
+  //Compute the objective function
+  objectif=int2d(Th)(k*((u-uo)^2+(v-vo)^2));
+  vals[iter-1] = objectif;
+  lagrange=int2d(Th)(k*((u-uo)^2+(v-vo)^2))+int2d(Th)(2.*mu*h*e(u,v)'*e(p1,p2)
+            +h*lambda*div(u,v)*div(p1,p2))-int1d(Th,GammaN)(g1*p1+g2*p2);
+//  Computation of the compliance
+  compliance=int1d(Th,GammaN)(g1*u+g2*v);
+  cout<<"objectif: "<<objectif<<endl;
+  cout<<"Compliance: "<<compliance<<" Volume: "<<volume<<" Lagrange: "<<lagrange<<endl;
+
+  if (objectif > objectifold*1.00001 )
+  {
+  // if we do not descent we refuse the step
+    step = step / 2. ;
+    cout << "Reject: new step=" << step << endl ;
+    h=hold ;
+    [u,v] = [uold, vold];
+    objectif = objectifold ;
+  }
+  else{
+    //如果运行的时候发现截止到这行就不走了，那就删掉中文注释就行，SB Freefem
+    /*原先是1.1，为了让他出现reject情况，换成了1.5
+    //收敛速度按照1.2或者1.3时候比较好
+    //MD上次居然是B就因为这个？？？！！！*/
+    step = step * 1.5 ;
+    cout << "New step=" << step << endl ;
+    // Compute the gradient using the adjoint method //
+    adjoint ;
+    gradient = 2.*mu*e(u,v)'*e(p1,p2)+lambda*div(u,v)*div(p1,p2);
+  };
+  //////////////////////////////////////////////
+  // Plot the thickness of the current design //
+  //////////////////////////////////////////////
+  volume = int2d(Th)(h);
+  compliance=int1d(Th,GammaN)(g1*u+g2*v);
+  caption="Iteration "+iter+", Compliance "+compliance+", Volume="+volume;
+  plot(Th,h,fill=1,value=true,viso=vviso,cmm=caption,wait=0);
+
+
+  /////////////////////
+  // End of the loop //
+  /////////////////////
+};
+
+//Plot the final design
+caption="Final design, Iteration "+iter+", Compliance "+compliance+", Volume="+volume;
+plot(Th,h,wait=1,fill=1,value=1,viso=vviso,cmm=caption);
+
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+real exag1=(1-coef*1.5)/3;
+real exag2=coef;
+Dh = movemesh (Th,[x+exag1*k*u+exag2*u,y+exag1*k*v+exag2*v]);
+plot(Dh,wait=1);
+//////////////////////////////////
+// Plot of the objectif Evolution //
+//////////////////////////////////
+real[int] dis = 1:niter;
+plot([dis,vals],wait=1,cmm="Evolution of the objective function");

@@ -1,0 +1,41 @@
+real H = 10, W = 5;
+int Nb = 10;
+//通过把alpha变得很大从而让这个边界条件等于零，是一种penetralisation
+//变成了direchelet的条件
+real alpha=10^5;
+int flag = 4;  // see what happens when changing the flag parameter (0,1,2,...)
+mesh Th = square(Nb*W,Nb*H,[x*W,y*H],flags=flag);
+
+plot(Th,cmm="Rectangular mesh",wait=1);
+
+
+int Omega1 = Th(0,0).region; // region associated to (r,0)
+
+cout << "Freefem++ identifier for region Omega1 is " << Omega1 << endl;
+
+// define a finite element space on the mesh Th
+// the type of FE space can be P0,P0,P2 by default
+// other options are available for complex problems (see the manual)
+
+fespace Vh(Th,P2);  // define the FE space
+Vh u,v;             // define some FE functions
+//Vh f=((x-2.5)^2+(y-2.5)^2-1)<0;
+Vh g=1,f=1;
+// Standard way to solve a problem in FreeFem
+// solve with keyword problem
+// problem是关键字，定义以后直接写出来就行了
+// dx 和dy是关键字
+problem Laplace(u,v) =
+    int2d(Th)((dx(u)*dx(v)+dy(u)*dy(v)) )
+   - int2d(Th)(f*v)
+   +int1d(Th,1,2)(alpha*(u*v))
+   -int1d(Th,1)(g*v)+on(3,u=0);
+//direchelet condition 用on 来添加， 然后前面是boundary的label
+//如果改变了边界形状等，只要Laplace自动会更新，所以写循环比较简便
+Laplace; //solve the problem
+plot(u,cmm="solution of the problem",wait=1);
+
+fespace Vh0(Th,P0);
+Vh0 ngrad = sqrt(dx(u)^2+dy(u)^2);
+
+plot(ngrad,cmm="norm of the gradient",fill=1,wait=1);

@@ -1,0 +1,101 @@
+// MAP 562 (G. Allaire, B. Bogosel)
+// Jan 16, 2019
+//
+// TD 2
+// Exercise 2
+//**********************************
+// Constraint 0 <= u <= 1
+//**********************************
+// Task 1: Run the program
+// Task 2: Understand how the derivative dJ is obtained (recall the
+//   theoretical exercise)
+// Task 3: Change the step-size -> How many (gradient) iterations to you observe ?
+// Task 4: Change the lower tolerance to stop the gradient algorithm
+//*************************************
+// gradient 在外部并没有active
+int N=50;	// Nb of edges on the boundary
+
+// Define the tolerance at which we want to stop
+// the calculation
+real lowertolerance =1.e-4;
+
+// Define the polynomial degree
+macro vh() P2 //
+
+// Define the mesh and boundaries
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+fespace Vh(Th,vh);
+
+// The solution u^{k} is denoted by u
+Vh du,f=sqrt((x-0.5)^2+(y-0.5)^2)-0.2,u,uold;
+
+// Initialize the initial guess u^0 as zero
+u = 0;
+
+// Implement the functional given in the exercise
+macro J(u) int2d(Th)(0.25*u^4-f*u)  //
+
+Vh error;
+
+// Solution loop
+real diffnorm = 1e+10;
+real stepsize = 0.1;
+real val,oldval;
+
+oldval = 10e10;
+
+real AreaOmega = Th.area;
+
+// Counter of the number of gradient steps
+int i=0;
+
+// Final loop
+while(diffnorm > lowertolerance || stepsize<1e-5)
+{
+        // Compute the descent direction given by the gradient
+	du = u^3-f;
+
+	// Compute new iterate u^{k+1}
+        uold = u;
+	      u = u - stepsize * du;
+
+
+        // Projection on the inequality constraints: truncation
+        //直接投影到0和1上出去就搞回来
+        u = min(max(u,0.),1.);
+
+	// Compute the L^1 difference between consecutive iterates
+        // and use this as a stopping criterion
+        // Other options are possible: L^2 norm, Linfinity, etc
+
+        // Note that in this case the norm of du may not be small
+        // at the optimum, because of the inequality constraints
+
+        diffnorm = (int2d(Th)(abs(u-uold)));
+
+        real average = 1/Th.area*int2d(Th)(u);
+        cout << "Average: " << average << endl;
+
+	// Evaluate the sought functional value
+	val = J(u);
+        // Output on the terminal and visualization
+	cout<<"Iter#"<<i<<" J="<<val << " ||u-uold||_1 =  "
+            << diffnorm  << endl;
+        cout << "Constraint verification: umin= " << u[].min << "  umax= " << u[].max<< endl;
+	plot(u,cmm="Iter#"+i+" J="+val,wait=0,fill=1,value=1);
+
+	// Increment iteration counter
+	i++;
+}
+
+Vh gradfinal = du;
+plot(gradfinal,fill=1,cmm="Final gradient");
+Vh ufree = 1-((u<=0)+(u>=1));
+plot(ufree,fill=1,cmm="Constraint");

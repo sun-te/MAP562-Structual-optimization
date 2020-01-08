@@ -1,0 +1,107 @@
+/////////////////////////////////////
+// Material parameters, "two-phases"
+// The two parameters are scalar,
+// thus the two phases are isotropic.
+real alpha=1.;
+real beta=10.;
+
+// Coefficients of the homogenized tensor A*
+real A11, A12, A21, A22 ;
+string legende ;
+
+//////////////////////////////// 			
+// Definition of the domain   // 	
+////////////////////////////////	
+mesh Sh;
+
+real pi=4*atan(1) ;
+real theta1=0.8;
+real theta2=0.4;
+real theta=theta1*theta2;
+real m1=(1-theta1)/(1-theta);
+real m2=theta1*(1-theta2)/(1-theta1*theta2);
+
+//  Top boundary
+border a1(t=1,0) { x=t; y=1;label=1; };
+// Left boundary
+border a2(t=1,0)  { x=0; y=t;label=2; };
+// Bottom boundary
+border a3(t=0,1) { x=t; y=0;label=3; };
+// Right boundary
+border a4(t=0,1) { x=1; y=t;label=4; };
+
+// Boundaries for material A
+real L=1/(4-theta1);
+real h=theta2;
+real hmin=0.001;
+
+//Rectangle 1 for material A
+//  Top boundary1
+border B1(t=L,L*(1-theta1)) { x=t; y=h;label=5; };
+// Left boundary1
+border B2(t=h,hmin)  { x=L*(1-theta1); y=t;label=5; };
+// Bottom boundary1
+border B3(t=L*(1-theta1),L) { x=t; y=hmin;label=5; };
+// Right boundary1
+border B4(t=hmin,h) { x=L; y=t;label=5; };
+
+//Rectangle 2 for material A
+//  Top boundary1
+border B5(t=L,L*(1-theta1)) { x=t+L; y=h;label=5; };
+// Left boundary1
+border B6(t=h,hmin)  { x=L*(1-theta1)+L; y=t;label=5; };
+// Bottom boundary1
+border B7(t=L*(1-theta1),L) { x=t+L; y=hmin;label=5; };
+// Right boundary1
+border B8(t=hmin,h) { x=L+L; y=t;label=5; };
+
+//Rectangle 3 for material A
+//  Top boundary1
+border B9(t=L,L*(1-theta1)) { x=t+2*L; y=h;label=5; };
+// Left boundary1
+border B10(t=h,hmin)  { x=L*(1-theta1)+2*L; y=t;label=5; };
+// Bottom boundary1
+border B11(t=L*(1-theta1),L) { x=t+2*L; y=hmin;label=5; };
+// Right boundary1
+border B12(t=hmin,h) { x=3*L; y=t;label=5; };
+
+//////////////////////////////
+// Mesh			    //
+//////////////////////////////
+int n=8 ;
+Sh= buildmesh (a1(5*n)+a2(5*n)+a3(5*n)+a4(5*n)+B1(5*n)+B2(5*n)+B3(5*n)+B4(5*n)+B5(5*n)+B6(5*n)+B7(5*n)+B8(5*n)+B9(5*n)+B10(5*n)+B11(5*n)+B12(5*n));
+//mesh Th = Sh ;
+
+plot(Sh,wait=1,ps="mesh1.eps"); 
+
+
+//////////////////////////////
+// Define FEM spaces
+fespace Vh1(Sh,P1,periodic=[ [1,x],[3,x],[2,y],[4,y] ]);
+
+// Solution variables: u1 and u2
+// Test function: phi
+Vh1 u1,u2,phi;	
+
+
+
+
+
+// Definition of the P0 space for the coefficient
+// Furthermore we define the characteristic function
+fespace Vh0(Sh,P0);
+Vh0 Ay , reg=region;	// Region labels
+
+int C1,C2,C3,C4;
+real xx=L-theta1*L/2;
+real yy=h/2;
+C1=reg(xx,yy);
+C2=reg(xx+L,yy);
+C3=reg(xx+2*L,yy);
+C4=reg(0.5,(1-h/2));
+
+//////////////////////////////
+// Definition of the characteristic function thanks to Lagrange's polynomial
+Ay = -alpha*(C2-reg)*(C3-reg)*(C4-reg)/((C1-C2)*(C1-C3)*(C1-C4)) - alpha*(C1-reg)*(C3-reg)*(C4-reg)/((C2-C1)*(C2-C3)*(C2-C4)) - alpha*(C2-reg)*(C1-reg)*(C4-reg)/((C3-C2)*(C3-C1)*(C3-C4)) - beta*(C2-reg)*(C3-reg)*(C1-reg)/((C4-C2)*(C4-C3)*(C4-C1)) ;			
+plot(Sh,Ay,fill=1,wait=1,value=true); 
+

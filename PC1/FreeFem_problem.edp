@@ -1,0 +1,69 @@
+// Example of usage of FreeFem++
+
+real r,r2;   // definition of radii as reals
+int n,n2;    // some integers for specifiing the number of points
+             // on borders
+real alpha;  // other parameters
+real k1,k2;
+
+// set parameters of the problem
+r=100;       
+r2=20;
+n=3; // parameter for indicating the number of points on boundaries
+alpha =2;
+k1=1;
+k2=1.e6;
+
+// define borders in a parametric way
+
+border gamma(t=0,2.*pi){ // parameter t varying in an interval
+       x = r*cos(t);   // formula for the x coordinate
+       y = r*sin(t);   // formula for the y coordinate
+       label=0;        // label - useful for boundary conditions
+ }  //parametrization of the border of gamma 
+border gamma2(t=0,2.*pi){
+       x = r2*cos(t);
+       y=r2*sin(t);
+       label=2;
+}   //parametrization of the border of gamma2 
+
+// construct mesh from borders using the command buildmesh
+mesh Th = buildmesh(gamma(n*r) + gamma2(n*r2)) ;
+plot(Th, wait=1, cmm="Omega with mesh Th");
+
+// identify the region numbers associated by FreeFem++
+int Omega2 = Th(0,0).region; // region associated to (0,0)
+int Omega1 = Th(r,0).region; // region associated to (r,0)
+
+cout << "Freefem++ identifier for region Omega2 is " << Omega2 << endl;
+cout << "Freefem++ identifier for region Omega1 is " << Omega1 << endl;
+
+// define a finite element space on the mesh Th
+// the type of FE space can be P0,P0,P2 by default
+// other options are available for complex problems (see the manual)
+
+fespace Vh(Th,P1);  // define the FE space
+Vh u,v;             // define some FE functions
+
+// Standard way to solve a problem in FreeFem
+// solve with keyword problem
+// problem是关键字，定义以后直接写出来就行了
+// dx 和dy是关键字
+problem Laplace(u,v) = 
+    int2d(Th,Omega1)(k1*(dx(u)*dx(v)+dy(u)*dy(v))) 
+   +int2d(Th,Omega2)(k2*(dx(u)*dx(v)+dy(u)*dy(v)))
+   -int2d(Th,Omega1)((x*y+1)*v)
+   -int1d(Th,0)(x*v)
+//direchelet condition 用on 来添加， 然后前面是boundary的label
+   +on(2,u=0);   //define the problem
+//如果改变了边界形状等，只要Laplace自动会更新，所以写循环比较简便
+Laplace; //solve the problem
+plot(u,cmm="solution of the problem",wait=1);
+
+fespace Vh0(Th,P0);
+Vh0 ngrad = sqrt(dx(u)^2+dy(u)^2);
+
+plot(ngrad,cmm="norm of the gradient",fill=1,wait=1);
+
+
+

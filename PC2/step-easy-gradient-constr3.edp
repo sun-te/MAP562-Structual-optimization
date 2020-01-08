@@ -1,0 +1,145 @@
+// MAP 562 (G. Allaire, B. Bogosel)
+// Jan 16, 2019
+//
+// TD 2
+// Exercise 2
+
+// Constraint 0 <= u <= 1 and fixed average
+
+// denote by trunc(u,0,1) the truncation of u between 0 and 1
+
+// Idea: the mapping t -> int2d(Th)(trunc(u+t)) is increasing
+// and takes all the values between 0 and 1 for t going from
+// -infty to +infty
+
+// use macros to project on the constraint!
+
+int N=50;	// Nb of edges on the boundary
+
+// Define the tolerance at which we want to stop
+// the calculation
+real lowertolerance =1.e-4;
+real TargetMean = 0.6; //the average we want here
+real mm=0,MM=1;  // bounds for u: mm<=u<=MM
+real TOL = 1e-6;
+
+// Define the polynomial degree
+macro vh() P1 //
+
+// Define the mesh and boundaries
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+fespace Vh(Th,vh);
+
+// The solution u^{k} is denoted by u
+Vh du,f=sqrt((x-0.5)^2+(y-0.5)^2)-0.2,u,uold;
+
+// Macro for truncation
+// define a function truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+// average u0
+macro proj(u,u0) {
+   u  = trunc(u,mm,MM);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   real tmin = mm-u[].max,tmax = MM-u[].min;
+   //当interval不够小或者平均值不行，
+   //
+   while(tmax-tmin>TOL||abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,mm,MM);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+   }
+   u = trunc(u+tmin,mm,MM);
+}// END of macro
+
+// Initialize the initial guess u^0 as zero
+u = 0;
+
+proj(u,TargetMean);
+
+// Test the projection
+plot(u,value=1);
+real testproj = 1/Th.area*int2d(Th)(u);
+cout << testproj << " " << u[].min << " " << u[].max << endl;
+
+// Implement the functional given in the exercise
+macro J(u) int2d(Th)(0.25*u^4-f*u)  //
+Vh error;
+
+// Solution loop
+real diffnorm = 1e+10;
+real stepsize = 0.1,maxstep=0.1;
+real val,oldval=10e10;
+real AreaOmega = Th.area;
+
+// Counter of the number of gradient steps
+int i=0;
+uold = u;
+// Final loop
+while(diffnorm > lowertolerance && stepsize > 1e-5)
+{
+        // Compute the descent direction given by the gradient
+	du = u^3-f;
+
+	// Compute new iterate u^{k+1}
+	u = u - stepsize * du;
+
+
+        // Projection on the inequality constraints
+        // and the integral constraint
+        proj(u,TargetMean);
+        testproj = 1/Th.area*int2d(Th)(u);
+
+
+	// Compute the L^1 difference between consecutive iterates
+        // and use this as a stopping criterion
+        // Other options are possible: L^2 norm, Linfinity, etc
+
+        // Note that in this case the norm of the gradient du may not be small
+        // at the optimum, because of the constraints
+
+        diffnorm = (int2d(Th)(abs(u-uold)));
+
+	// Evaluate the sought functional value
+	val = J(u);
+        // Example of step adaptation
+        if(val<oldval){
+        // Accepted Iteration
+        // Output on the terminal and visualization
+	cout<<"Iter#"<<i<<" J="<<val << " ||u-uold||_1 =  "
+            << diffnorm  << endl;
+        cout << "Constraint verification: umin= " << u[].min << "  umax= " << u[].max<< " Average: " << testproj << endl;
+	plot(u,cmm="Iter#"+i+" J="+val,wait=0,fill=1,value=1);
+           uold = u;
+           oldval = val;
+           //如果s在下降，那么就扩大步长
+           stepsize = min(stepsize*1.1,maxstep);
+
+	}
+        else{
+          // Rejected iteration: decrease step size and
+          //                     keep the old function u
+          //如果数值没有在减小，那么就缩小步长
+          stepsize = 0.9*stepsize;
+          u = uold;
+        }
+	// Increment iteration counter
+	i++;
+}

@@ -1,0 +1,276 @@
+// Optimal radiator                  //
+//                                   //
+// Ecole Polytechnique, MAP 562      //
+// Copyright G. Allaire, 2004        //
+// 	     		 	     //
+// modified by T. Wick, N. Spillane, B. Bogosel  //
+
+
+//Problem parameters
+int niter=400;			// Number of total iterations
+int npen= 400;			// Starting iterations without penalization
+int n=20;			// Size of the mesh
+real lagrange=1.;		// Lagrange multiplier for the volume
+real lagmin, lagmax ;		// Lower and upper bounds of the Lagrange multiplier
+int inddico ;	    		// Counter of iterations of the dichonomy problem
+real objectivefct;		// Objective function
+real volume0;			// Initial volume
+real volume,volume1;		// Current volume
+real maxstep = 0.5;
+
+real gx=0,gy=-1;
+
+real E=1;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+real p = 1;
+
+verbosity = 0;
+
+real hmin = 0.;
+real hmax = 1;
+real TOL = 1e-6;
+
+real step = 0.1;
+
+// Some output commands
+string caption;			// caption for graphical outputs
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+
+// applied forces on the top boundary
+func g=1;  			// Temperature flux
+
+
+/////////////////////////////////
+// Defining the two phases
+// and the characteristic function theta
+/////////////////////////////////
+real alpha=0.0001;
+real beta=1;
+func theta0=(x>0.1)*(x<0.9)*(y<0.9) ;
+
+
+
+//////////////////////////////// 	1:Dirichlet condition
+// Definition of the domain   // 	2:Neumann condition
+//////////////////////////////// 	3:Non-homogen. Neumann (temp. flux)
+mesh Th, Dh;
+
+int GammaD=1,GammaN=2,Gamma=3,GammaZ=10;
+
+
+real[int] xL = [0, 2, 2, 2, 2, 1, 1, 0];
+real[int] yL = [0, 0, 0.375, 0.625,1,1,2,2];
+int[int] labelL = [Gamma,Gamma,GammaN,Gamma, Gamma,Gamma , GammaD,Gamma];
+int[int] numberL = n*[2,0.375,0.25,0.375,1,1,1,2];
+
+border Lbord(t=0,1; i){
+   int nexti = (i+1)%xL.n;
+   x = (1-t)*xL[i]+t*xL[nexti];
+   y = (1-t)*yL[i]+t*yL[nexti];
+   label = i;
+};
+
+plot(Lbord(numberL),wait=1);
+Th=buildmesh(Lbord(numberL));
+plot(Th,wait=1);
+
+//////////////////////////////////
+// Defining the finite elements //
+//////////////////////////////////
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,P2);
+
+// Solution variable: T
+// Test function: v
+Vh2 u,v,w,s;
+
+// P0-space (constants) for
+// the characteristic functions
+// and the density (similar to geometric optimization)
+Vh0 theta,density, thetb,A,tau,gradient,thetaold;
+
+
+////////////////////////////////////
+// Proportions of the two phases  //
+////////////////////////////////////
+theta = 0.4;//1-theta0;//1-0.280379;//theta0 ;
+
+
+///////////////////////////////
+// Implementation of the PDE //
+///////////////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+
+macro grad(u) [dx(u),dy(u)]//
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(A*(2.*mu*e(u,v)'*e(w,s)
+             +lambda*div(u,v)*div(w,s)))
+   -int1d(Th,GammaN)(gx*w+gy*s)
+    +on(GammaD,u=0,v=0);
+
+////////////////////////////////
+// In the following, we perform
+// the initialization of the
+// volume and the objective function
+////////////////////////////////
+
+// Initial volume
+volume0=int2d(Th)(theta);
+
+// Solve once the PDE in order
+// to get the initial temperature field.
+// This temperature is then used
+// to initialize the objective function.
+A= (alpha*(1-(theta)^p)+beta*(theta)^p);
+elasticity;
+
+// Compute the objective function
+objectivefct = int1d(Th,GammaN)(gx*u+gy*v);
+cout<<"Initialization. Objective fct = "<<objectivefct<<" Volume = "<<volume0<<endl;
+
+
+// Update the thetb (phase 2)
+
+// Visualization
+int iter;
+iter=0;
+caption="Iteration "+iter+", Objective fct= "+objectivefct+", Volume="+volume0;
+plot(Th,theta,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+macro proj(u,u0,Vh) {
+   real tmin = hmin-u[].max,tmax = hmax+u[].min;
+   u  = trunc(u,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   while(tmax-tmin>TOL&&abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << " " << v0-u0 << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro
+
+
+
+// Optimization loop		 //
+
+real objold;
+Vh2 uold,vold;
+
+real[int] vals(niter);
+vals[0] = objectivefct;
+int accept;
+for (iter=1;iter< niter;iter=iter+1)
+{
+accept = 0;
+cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+uold = u;
+vold = v;
+objold = objectivefct;
+thetaold = theta;
+Th =adaptmesh(Th,u,hmin=0.1,hmax=0.3);
+// Computing the energy density
+gradient = -p*(theta)^(p-1)*(beta-alpha)*
+         (2*mu*e(u,v)'*e(u,v)+lambda*div(u,v)*div(u,v));
+
+// Update the proportions of the two phases and
+// project them onto their limit values if necessary
+theta = thetaold-step*gradient;
+
+// Apply penalization (slide 67 in lecture chapter7.pdf), once
+// the "initial" number of iterations has been exceeded.
+//if (iter > npen) { theta = ( 1 - cos(pi*theta) )/2 ; };
+
+
+proj(theta,volume0/Th.area,Vh0);
+
+if(iter==npen){
+  p = 2;accept=1;
+}
+
+if(iter==(npen+50)){
+  p = 2.5;accept=1;
+}
+
+if(iter==(npen+100)){
+  p = 3;accept=1;
+}
+
+// After having computed all constraints
+// and the proportions of the two phases, we
+// solve the PDE (i.e., the thermal problem)
+A= (alpha*(1-(theta)^p)+beta*(theta)^p);
+elasticity;
+//plot(T,wait=1);
+
+// Evaluate the cost functional
+objectivefct=int1d(Th,GammaN)(gx*u+gy*v);
+vals[iter] = objectivefct;
+cout<<"Objective fct: "<<objectivefct<<" Volume: "<<volume <<endl;
+
+if(objectivefct<objold*1.00001|| accept==1){
+   uold = u;
+   vold = v;
+   thetaold = theta;
+   objold = objectivefct;
+   step = 1.5*step;
+   step = min(step,maxstep);
+
+   // Finally we update the proportion
+   volume = int2d(Th)(theta);
+   caption="Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+   plot(theta,fill=1,value=0,viso=vviso,cmm=caption,wait=0);
+
+}
+else{
+   cout << "Reject " << endl;
+   iter = iter-1;
+   step = step/2;
+   u = uold;
+   v = vold;
+   theta = thetaold;
+}
+
+Dh=movemesh(Th,[u,v]*0.00000000000001);
+plot(Dh);
+cout << "Step=" << step << endl;
+cout << "Theta min=" << theta[].min << "Theta max=" << theta[].max << endl;
+}; // end of the optimization loop
+
+
+// Final updates and visualization
+
+caption="Final Shape, Iteration "+iter+", Objective fct "+objectivefct+", Volume="+volume;
+plot(Th,theta,wait=1,fill=1,viso=vviso,cmm=caption);
+
+real[int] dis(niter);
+dis = 1:niter;
+plot([dis,vals],cmm="Cost function evolution");

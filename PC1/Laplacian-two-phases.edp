@@ -1,0 +1,49 @@
+// Resolution of
+// -  div k grad u = f 	in \Omega
+//	u=0		on \Gamma_D
+//	du/dn=g 	on \Gamma_N
+
+int N=20;	// Nb of edges on the boundary
+func f=1;	// volumic flux
+real k1=1,k2=10;// conductivity in Omega1 and Omega2
+
+macro vh() P1	// finite element space used
+
+mesh Sh;        // define a mesh variable
+int GammaD;   
+int Omega1,Omega2;
+
+// using brackets saves memory in FreeFem
+// variables that are defined inside the brackets are not available outside
+
+{
+	real r=0.2;		// radius of inner inclusion
+	real cx=0.5,cy=0;	// center of the inclusion
+	GammaD=1;
+	border a(t=0,2.*pi){x=cos(t);y=sin(t);label=GammaD;}
+                                // use the command border
+                                // to define boundaries parametrically
+	border b(t=0,2.*pi){x=r*cos(t)+cx;y=r*sin(t)+cy;label=2;}
+	Sh=buildmesh(a(N*2*pi)+b(N*2*pi*r));
+	Omega1=Sh(0,1).region;  // find the region number
+                                // associated to point (0,1)
+	Omega2=Sh(cx,cy).region;// find the region number 
+                                // associated to point (cx,cy)
+}
+
+plot(Sh,wait=1);        // show the mesh
+
+fespace Vh(Sh,vh);	// finite element space
+Vh u,v;			// state and test functions
+
+macro grad(u) [dx(u),dy(u)] //	gradient operator
+
+// statement of the problem
+problem Laplacian(u,v)=
+       int2d(Sh,Omega1)(k1*grad(u)'*grad(v))
+      +int2d(Sh,Omega2)(k2*grad(u)'*grad(v))
+      -int2d(Sh)(f*v)
+      +on(GammaD,u=0);
+
+Laplacian;  // solve the problem
+plot(u,cmm="potential",wait=1);  // show the solution

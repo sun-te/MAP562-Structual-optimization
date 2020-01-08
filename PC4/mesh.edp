@@ -1,0 +1,249 @@
+int niter=10;			// Number of iterations
+int n=2;			// Size of the mesh
+real r=0.1;
+real lagrange=1.;		// Lagrange multiplier for the volume constraint
+real lagmin, lagmax ;		// Bounds for the Lagrange multiplier
+int inddico ;
+real objectif;		// Objectif
+real objectifold;		// Objectif
+real volume0;			// Initial volume
+real volume,volume1;		// Volume of the current shape
+real exa=1;			// Coefficient for the shape deformation
+string caption,legende;			// Caption for the graphics
+real E=100;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+func g1=0;  			// Applied forces
+func g2=100;
+real[int] vviso(21);
+for (int i=0;i<21;i++)
+vviso[i]=i*0.05 ;
+//////////////////////////////////////
+// Computation of Lame coefficients //
+//////////////////////////////////////
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+real pas=0.1 ;			// Stepsize
+real TOL = 1e-5;
+
+////////////////////////////////////////////////////
+// Lower and upper bounds for the plate thickness //
+////////////////////////////////////////////////////
+real hmin=0.1;
+real hmax=1.0;
+real hmoy=0.5;
+func h0=hmoy ;
+
+/////////////////////// 			1:Dirichlet boundary condition
+// Domain definition // 			2:Neumann boundary or free boundary condition
+/////////////////////// 			3:Non-homogeneous Neumann or applied load
+mesh Th, Dh;
+
+// 0:GammaD  1:GammaN  2:free  3: GammaS
+
+border C1(t=0,2*pi){
+   x = 0.4+r*cos(t);
+   y = 0.3+r*sin(t);
+   label = 0;
+}
+
+border bd(t=0,1)       { x=+1; y=t;label=0; };   // right boundary of the domain
+border bg1(t=0.7,0.5)  { x=-1; y=t;label=0; };
+border bg2(t=0.5,0)    { x=-1; y=t;label=0; };   // left boundary of the domain
+border bg3(t=1,0.7)    { x=-0.5; y=t;label=2; };
+border bg4(t=0.5,0.7)    { x=-0.5; y=t;label=2; };
+border bt1(t=1,-0.5)	{ x=t;  y=1;label=3; };
+border bt2(t=-0.5,-1)      { x=t;  y=0.7;label=2; };   // upper boundary of the domain
+border bm(t=-1,-0.5)  {x=t; y=0.5; label=2;};
+border b1(t=-1,0.6)   { x=t;  y=0;label=2; };   // lower boundary of the domain
+border b2(t=0.6,1) { x=t;  y=0;label=1; };
+
+
+///////////////////////
+// Building the mesh //
+///////////////////////
+n = 2 ;
+int m = 3 ;
+Th= buildmesh (bd(10*n)+bt1(15*n)+bg3(3*n)+bt2(5*n)+bg1(2*n)+bm(5*n)+bg4(2*n)+bg2(5*n)+b1(16*n)+b2(4*n)+C1(-10*n));
+//plot(Th,wait=0);
+
+/////////////////////////////////////////////
+// Definition of the finite element spaces //
+/////////////////////////////////////////////
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u,v],[w,s],[p,q],[uold,vold];
+Vh0 h,hold,density,gradient;
+
+h = h0 ;
+
+Vh2 [u1,u2]=[0,0.2];
+
+///////////////////////
+// Elasticity system //
+//////////////////////
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+
+//!!!!!
+// The symmetry condition in elasticity!
+//
+// in order to impose a symmetry condition for the elasticity equation
+// work on half the domain and impose that the displacement
+// orthogonal to the symmetry axis is zero (as a Dirichlet boundary condition)
+
+
+problem elasticity([u,v],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u,v)'*e(w,s)
+              +h*lambda*div(u,v)*div(w,s))// bilinear part
+    -int1d(Th,1)(g1*w+g2*s)	          // forces; for bulk forces, add a volumic term
+    +on(0,u=0)
+    +on(0,v=0)                        // Dirichlet boundary conditions
+    +on(3,v=0)                        // Symmetry boundary conditions
+;
+
+
+int Omega2 = Th(0.1,0.1).region;
+int Omega1 = Th(-0.9,0.65).region;
+cout<<"Omega1 "<<Omega1<<endl;
+cout<<"Omega2 "<<Omega2<<endl;
+// Define the adjoint state //
+problem adjoint([p,q],[w,s]) =
+    int2d(Th,Omega1)(2.*((u-u1)*w+(v-u2)*s))
+   +int2d(Th)(2.*mu*h*e(p,q)'*e(w,s)
+             +h*lambda*div(p,q)*div(w,s))
+   +on(0,p=0)
+   +on(0,q=0)
+   +on(3,q=0)
+;
+
+
+
+////////////////////
+// Initial volume //
+////////////////////
+volume0=int2d(Th)(h);
+
+////////////////////////
+// Initial compliance //
+////////////////////////
+elasticity;
+objectif=int2d(Th,Omega1)((u-u1)*(u-u1)+(v-u2)*(v-u2));
+
+cout<<"Initialization. Objectif: "<<objectif<<" Volume: "<<volume0<<endl;
+
+// Adjoint and initial gradient  //
+
+adjoint ;
+
+//gradient = 2*grad(u)'*grad(p);
+gradient = 2.*mu*e(u,v)'*e(p,q)+lambda*div(u,v)*div(p,q);
+
+real norgrad=int2d(Th)(gradient*gradient);
+norgrad=sqrt(norgrad) ;
+cout << "Gradient: " << norgrad   << endl ;
+real eps=1.e-6;
+
+pas=pas/(norgrad+eps) ;
+cout << "First step "<< pas << endl;
+
+
+int iter;
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+macro proj(u,u0,Vh) {
+   u  = trunc(u,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   real tmin = hmin-u[].max,tmax = hmax-u[].min;
+   while(tmax-tmin>TOL||abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro
+
+real[int] vals(niter);
+
+// Optimization loop
+for (iter=1;iter<=niter;iter=iter+1)
+{
+cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+hold = h ;
+objectifold = objectif ;
+[uold,vold] = [u,v] ;
+
+h = hold - pas*gradient;
+
+proj(h,volume0/Th.area,Vh0);
+
+// Solve the conductivity equation
+elasticity;
+
+//Compute the objective function
+//objectif=int1d(Th,2)((u-u0)^2); //1.1
+objectif=int2d(Th,Omega1)((u-u1)*(u-u1)+(v-u2)*(v-u2));
+vals[iter-1] = objectif;
+
+if (objectif > objectifold*1.00001 )
+{
+// if we do not descent we refuse the step
+  pas = pas / 2. ;
+  cout << "Reject: new step=" << pas << endl ;
+  h=hold ;
+  [u,v] = [uold,vold];
+  objectif = objectifold ;
+}
+else
+{
+// on accepte le pas
+  pas = pas * 1.1 ;
+  cout << "New step=" << pas << endl ;
+
+  // Compute the gradient using the adjoint method //
+  adjoint ;
+  gradient = 2.*mu*e(u,v)'*e(p,q)+lambda*div(u,v)*div(p,q);
+};
+
+
+// End of loop. Show the result  //
+
+volume = int2d(Th)(h);
+
+cout << "Objectif: " << objectif   << endl ;
+cout<<"Cout: "<<objectif<<" Volume: "<<volume<<endl;
+legende="Iteration "+iter+", Cout "+objectif+", Volume="+volume;
+plot(Th,h,fill=1,value=0,viso=vviso,cmm=legende,wait=0);
+
+cout << volume << " " << volume0 << endl;
+
+};
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+
+func k=(x>=-1 && x <=-0.5) &&(y>=0.5 && y<=0.7);
+real coef = 0.05 ;
+//plot(h,fill=1,wait=1,cmm="Plot the density h");
+Dh = movemesh (Th,[x+coef*u+0.8*k*u,y+coef*v+0.8*k*v]);
+plot(Dh,wait=1,cmm="Plot of the deformed mesh");
