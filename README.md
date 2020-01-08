@@ -1,5 +1,6 @@
 # MAP562-Structual-optimization
-structure optimization course materials, including homework, lecture note, etc.
+
+This repository contains my memo for MAP562-structure optimization at Polytechnique, second period, 2018-2019. Structure optimization course materials, including homework, lecture note, etc. I have been "binomé" with my friend Xiang.
 
 This course introduces techniques like shape optimization, parameter optimization and finally topological optimization.
 The main formulation of the problem is based on variational methods, finit elements based.
