@@ -1,0 +1,200 @@
+
+
+// Optimize the position and parameters of an superellipse so that the compliance is minimized
+
+
+real a=0.5,b=1,l=2;
+real cx = 0.0,cy=0.1;
+int maxiter = 200;
+real maxstep = 0.01;
+
+real fixedV = 1;
+
+real step = 0.05;
+
+verbosity = 0;
+
+real alpha =0.5;
+
+real E=1;			// Young modulus
+real nu=0.3;			// Poisson coefficient (between -1 and 1/2)
+
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+int NN = 10;
+int Ni = 2;
+
+int GammaD = 0,GammaN = 1,Gamma0=20;
+
+border left(t=l,-l){x=-l;y=t;label=GammaD;}
+border bot(t=-l,l){x=t;y=-l;label=GammaN;}
+border right(t=-l,l){x=l;y=t;label=GammaN;}
+border top(t=l,-l){x=t;y=l;label=GammaN;}
+
+border superellipse(t=0,2*pi){
+  if(t>=0 && t<=0.5*pi){
+   x = a*sqrt(cos(t))+cx;
+   y = b*sqrt(sin(t))+cy;
+  }
+  else if(t<=1.0*pi && t>=0.5*pi){
+    x = -a*sqrt(-cos(t))+cx;
+    y = b*sqrt(sin(t))+cy;
+  }
+  else if(t>=pi && t<=1.5*pi){
+    x = -a*sqrt(-cos(t))+cx;
+    y = -b*sqrt(-sin(t))+cy;
+  }
+  else{
+    x = a*sqrt(cos(t))+cx;
+    y = -b*sqrt(-sin(t))+cy;
+  }
+   label = Gamma0;
+}
+
+plot(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+                   +superellipse(Ni*(a+b)*pi*NN),wait=1);
+
+// Gamma(1.25)^2/Gamma(1.5)
+real ratiogamma=0.9064024770554788^2 / (sqrt(pi)*0.5);
+
+
+real ratio = 4*ratiogamma*a*b/fixedV;
+   a = a/sqrt(ratio);
+   b = b/sqrt(ratio);
+
+mesh Th = buildmesh(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+                   +superellipse(-Ni*(a+b)*pi*NN));
+
+plot(Th);
+
+fespace Vh(Th,P1);
+fespace Vh0(Th,P0);
+
+Vh ux,uy,vx,vy;
+
+
+real sqrt2 = sqrt(2);
+macro e(ux,uy) [dx(ux),dy(uy),(dx(uy)+dy(ux))/sqrt2]//
+macro div(ux,uy) (dx(ux)+dy(uy))//
+macro Aeueu(ux,uy) (2*mu*e(ux,uy)'*e(ux,uy)+lambda*div(ux,uy)*div(ux,uy))//
+
+problem elasticity([ux,uy],[vx,vy],solver=sparsesolver) =
+  int2d(Th)(2*mu*e(ux,uy)'*e(vx,vy)+lambda*div(ux,uy)*div(vx,vy))
+ -int1d(Th,GammaN)(N.x*vx+alpha*N.y*vy)
+ +on(GammaD,ux=0,uy=0);
+
+elasticity;
+plot([ux,uy]);
+
+real compliance = int2d(Th)(Aeueu(ux,uy));
+cout << "Compliance: " << compliance << endl;
+
+real compliance2 = int1d(Th,GammaN)(N.x*ux+alpha*N.y*uy);
+cout << "Compliance: " << compliance2 << endl;
+
+Vh0 grad;
+grad = -Aeueu(ux,uy);
+
+real valold = 1e100;
+
+real aold,bold,cxold,cyold;
+
+real[int] vals(maxiter);
+vals[0]=compliance;
+
+
+aold = a;
+bold = b;
+cxold = cx;
+cyold = cy;
+
+for(int i=1;i<maxiter;i++){
+   // derivatives with respect to the parameters of the problem
+   // note that only the vector field describing the boundary perturbation is needed in order to find these derivatives
+
+   // the center of the superellipse
+   real derivx = int1d(Th,Gamma0)(grad*N.x);
+   real derivy = int1d(Th,Gamma0)(grad*N.y);
+   // the parameters of the superellipse
+   real deriva = int1d(Th,Gamma0)(grad*(N.x*(x-cx)/a));
+   real derivb = int1d(Th,Gamma0)(grad*(N.y*(y-cy)/b));
+
+   func signcos=2*(x>=0)-1;
+   func signsin=2*(y>=0)-1;
+
+   real nxy = sqrt(derivx^2+derivy^2);
+   real nab = sqrt(deriva^2+derivb^2);
+
+   // normalize gradients since the difference is too big sometimes...
+   // note that this also gives a descent direction
+   derivx = derivx/nxy;
+   derivy = derivy/nxy;
+   deriva = deriva/nab;
+   derivb = derivb/nab;
+
+   cout << derivx << " " << derivy << endl;
+   cout << deriva << " " << derivb << endl;
+
+   // Gradient descent step
+   cx = cx-step*derivx;
+   cy = cy-step*derivy;
+
+   a  = a-step*deriva;
+   b  = b-step*derivb;
+
+   // check to see if the superellipse can fit into the square
+   a  = max(0.01,min(l-0.01,a));
+   b  = max(0.01,min(l-0.01,b));
+
+
+   // project on the area constraint
+   real ratio = 4*ratiogamma*a*b/fixedV;
+   a = a/sqrt(ratio);
+   b = b/sqrt(ratio);
+
+   // make sure that the center of the superellipse is compatible with the superellipse being interior to the square
+   cx = max(cx,-l+a+0.1);
+   cx = min(cx,l-a-0.1);
+
+   //cout << cx << " " << cy << endl;
+   //cout << a << " " << b << endl;
+
+
+   // once everything is done, construct the new mesh
+   Th = buildmesh(left(2*NN)+bot(2*NN)+right(2*NN)+top(2*NN)
+                   +superellipse(-Ni*(a+b)*pi*NN));
+
+
+   plot(Th,wait=0);
+
+   // solve the problem and compute the compliance
+   elasticity;
+   real compliance = int2d(Th)(Aeueu(ux,uy));
+   vals[i] = compliance;
+   if(compliance<valold){
+       // If the compliance is decreased, compute the new gradient and advance
+       cout << "Accept" << endl;
+       cout << "Compliance: " << compliance << endl;
+        grad = -Aeueu(ux,uy);
+        step = min(maxstep,1.1*step);
+        aold = a;
+        bold = b;
+        cxold = cx;
+        cyold = cy;
+        valold = compliance;
+   }
+   else{
+        cout << " Reject" << endl;
+        step = step*0.5;
+        a = aold;b=bold;cx=cxold;cy=cyold;
+   }
+}
+real coef=1;
+mesh Dh = movemesh (Th,[x+ux*coef,y+uy*coef]);
+plot(Dh,wait=5,cmm="Deformation");
+//////////////////////////////////
+// Plot of the objectif Evolution//
+//////////////////////////////////
+real[int] dis = 1:vals.n;
+plot([dis,vals],wait=1,cmm="Evoluion of cost function");

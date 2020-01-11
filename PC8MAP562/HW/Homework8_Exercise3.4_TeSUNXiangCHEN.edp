@@ -1,0 +1,321 @@
+//Homework8 Exercise3 circle
+
+//Author: Te SUN & Xiang CHEN
+
+// Question 3.4
+// J = int(GammaN)(T*T)
+// shape circle
+
+real R=1;           // radius of the circle
+int niter=400;			// Number of iteration
+int npen = 150;
+int n = 20;				// Mesh size
+cout<<"Please enter the mesh size(default is 20):"<<endl;
+cin>>n;
+real pas=0.1 ;			// Stepsize
+real initpas = pas;
+int inddico ;
+real objectif;			// Objective function
+real objectifold ;
+real volume0=0.7;			// Initial volume
+real volume;
+string legende;			// L�gende pour les sorties graphiques
+
+int accept=0;
+
+real TOL = 1e-6;
+real Cpen = 0;
+int pen = 0;
+
+real alpha=1;
+real beta=10;
+
+
+// We consider to change the initialization of the Mesh
+// at first we try the circle in the center but we find that it doesn't move anymore
+// so we change an initial which connect the GammaD with several attempt.
+
+//func theta0=((x^2+y^2)<(0.5*R)^2) * (x<0.5*R) *(x>-0.5*R)*(y>-0.3*R)+ (y<=-0.3*R)*(y>=-0.5*R);
+//func theta0=((x^2+y^2)<(0.5*R)^2) ; // it doesn't work
+func theta0=((x^2+y^2)<(0.5*R)^2) * (x<0.5*R) *(x>-0.5*R)*(y>-0.3*R)+ (x<=0.3*R)*(x>=-0.3*R)*(y<-0.3*R);
+verbosity = 0;
+
+// Maximum and minimal width of the plate//
+real u0=0;
+real hmin=0.001;
+real hmax=1.0;
+real hmoy=0.3;  // initialization with a constant function
+func h0=hmoy;
+
+real[int] vviso;
+real lb = 0.;
+real ub = 1.;
+int nb = 32;
+vviso=lb:(ub-lb)/nb:ub;
+
+
+// Construct the mesh //
+mesh Th ;
+
+int GammaD=1,GammaN=2,Gamma=3;
+
+border c1(t=0,pi)  { x=R *cos(t) ; y=R*sin(t); label=GammaN;};
+border c2(t=pi,pi*17.0/12)  { x=R *cos(t) ; y=R*sin(t); label=Gamma;};
+border c3(t=pi*17.0/12,pi*19.0/12)  { x=R *cos(t) ; y=R*sin(t); label=GammaD;};
+border c4(t=pi*19.0/12,pi*2)  { x=R *cos(t) ; y=R*sin(t); label=Gamma;};
+//////////////////////////////
+// Construction of the mesh //
+//////////////////////////////
+Th= buildmesh (c1(R*n*pi)+c2(R*n*pi*5.0/12)+c3(R*n*pi*2.0/12)+c4(R*n*pi*5.0/12));
+plot(c1(R*n*pi)+c2(R*n*pi*5.0/12)+c3(R*n*pi*2.0/12)+c4(R*n*pi*5.0/12),wait=1);
+plot(Th,wait=1);
+
+
+fespace Vh0(Th,P0);//Definition of the P0 space
+fespace Vh1(Th,P1);
+fespace Vh(Th,P2);
+
+Vh1 thetav;
+Vh u,w,p,uold;
+
+Vh0 theta;
+Vh0 ang=0.5*pi;//*(abs(x-0.5)+0.1*abs(y));
+plot(ang,fill=1,wait=1);
+theta = theta0;
+//theta = 1/Th.area*int2d(Th)(theta);
+
+plot(theta,fill=1,wait=1);
+
+// Macros
+
+macro grad(u) [dx(u),dy(u)]//
+// Define the PDE //
+
+macro lp() (alpha*theta+beta*(1-theta))//
+macro lm() 1/(1/alpha*theta+1/beta*(1-theta))//
+macro dlp() (alpha-beta)//
+macro dlm() -(1/alpha-1/beta)/(1/alpha*theta+1/beta*(1-theta))^2//
+
+problem heat(u,w) =
+    int2d(Th)(
+    (lp*(cos(ang)^2*dx(u)-cos(ang)*sin(ang)*dy(u))
+    +lm*(sin(ang)^2*dx(u)+cos(ang)*sin(ang)*dy(u)))*dx(w)
+   +(lp*(-cos(ang)*sin(ang)*dx(u)+sin(ang)^2*dy(u))
+    +lm*(sin(ang)*cos(ang)*dx(u)+cos(ang)^2*dy(u)))*dy(w)
+    )
+   -int1d(Th,GammaN)(w)
+    +on(GammaD,u=0)
+;
+
+// Define the adjoint state //
+problem adjoint(p,w) =
+    int2d(Th)(
+    (lp*(cos(ang)^2*dx(p)-cos(ang)*sin(ang)*dy(p))
+    +lm*(sin(ang)^2*dx(p)+cos(ang)*sin(ang)*dy(p)))*dx(w)
+  +( lp*(-cos(ang)*sin(ang)*dx(p)+sin(ang)^2*dy(p))
+    +lm*(sin(ang)*cos(ang)*dx(p)+cos(ang)^2*dy(p)))*dy(w))
+   +int1d(Th,GammaN)(2*u*w)
+   +on(GammaD,p=0)
+;
+
+
+// Compute initial volume //
+volume0=int2d(Th)(theta);
+
+
+// Initial objective function //
+heat;
+plot(u,fill=1,wait=1,cmm="Initial temperature");
+objectif=int1d(Th,GammaN)(u*u);
+
+cout<<"Initialization. Objective: "<<objectif<<" Volume: "<<volume0<<endl;
+
+
+// Adjoint and initial gradient  //
+
+adjoint ;
+plot(p,fill=1,wait=1,cmm="Initial adjoint");
+
+// computing gradients w.r.t. phi and theta
+
+// macros are useful here, since we have long formulas
+// that we use multiple times...
+Vh0 gradphi;
+macro dPhi()
+  gradphi =
+   (lp*(-2*cos(ang)*sin(ang)*dx(u)-(cos(ang)^2-sin(ang)^2)*dy(u))
+    +lm*(2*sin(ang)*cos(ang)*dx(u)+(cos(ang)^2-sin(ang)^2)*dy(u)))*dx(p)
+   +(lp*(-(cos(ang)^2-sin(ang)^2)*dx(u)+2*sin(ang)*cos(ang)*dy(u))
+    +lm*((cos(ang)^2-sin(ang)^2)*dx(u)-2*sin(ang)*cos(ang)*dy(u)))*dy(p);//
+
+Vh0 gradtheta;
+macro dTheta()
+   gradtheta  =
+    (dlp*(cos(ang)^2*dx(u)-cos(ang)*sin(ang)*dy(u))
+    +dlm*(sin(ang)^2*dx(u)+cos(ang)*sin(ang)*dy(u)))*dx(p)
+   +(dlp*(-cos(ang)*sin(ang)*dx(u)+sin(ang)^2*dy(u))
+    +dlm*(sin(ang)*cos(ang)*dx(u)+cos(ang)^2*dy(u)))*dy(p);//
+
+dPhi;
+dTheta;
+
+real norgrad=int2d(Th)(gradphi*gradphi)+int2d(Th)(gradtheta*gradtheta);
+norgrad=sqrt(norgrad) ;
+cout << "Gradient: " << norgrad   << endl ;
+//initpas=pas/norgrad ;
+cout << "First step "<< pas << endl;
+
+int iter;
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+// Macro for projection on the integral constraint
+
+// !!!! Do not write comments with "//" in macros since this
+// terminates a macro in FreeFem. Use /*...*/ instead if you want
+macro proj(u,u0,Vh) {
+   real tmin = hmin-u[].linfty,tmax = hmax+u[].linfty;
+   u  = trunc(u,hmin,hmax);
+   real v0 = 1/Th.area*int2d(Th)(u);
+   while(tmax-tmin>TOL&&abs(v0-u0)>TOL){
+     real tmid = 0.5*(tmin+tmax);
+     Vh testu = trunc(tmid+u,hmin,hmax);
+     v0 = 1/Th.area*int2d(Th)(testu);
+     if(v0<u0){
+       tmin = tmid;
+     }
+     else{
+       tmax = tmid;
+     }
+     /*cout << tmin << " " << tmax << " " << v0-u0 << endl;*/
+     /*cout << v0 << " " << u0 << endl;*/
+   }
+   u = trunc(u+tmin,hmin,hmax);
+}// END of macro
+
+proj(theta,volume0/Th.area,Vh0);
+
+real[int] vals(niter);
+
+Vh pold = p;
+Vh0 thetaold,angold;
+
+// Optimization loop
+for (iter=1;iter<=niter;iter=iter+1)
+{
+    cout <<"Iteration " <<iter <<" ----------------------------------------" <<endl;
+
+    accept = 0; // variable to accept by default
+    if(iter == npen){
+     Cpen = 1;
+     accept = 1;  // accept this iteration
+    }
+
+    if(iter == (npen+1000)){
+     Cpen = Cpen*2;// increase penalization constant
+     accept = 1;  // accept this iteration
+    }
+
+    thetaold = theta ;
+    angold   = ang;
+    objectifold = int1d(Th,GammaN)(u*u);
+    if(iter>npen){// modify objective when using a penalization
+      objectifold=int1d(Th,GammaN)(u*u)+Cpen*int2d(Th)(theta*(1-theta));
+    }
+
+    uold = u ;
+
+    //reg;
+
+    if(iter>npen){  // modify gradient when using a penalization
+          dTheta;
+          gradtheta = gradtheta+Cpen*(1-2*theta);
+        }
+
+        real Gtheta = sqrt(int2d(Th)(gradtheta^2));
+        real Gphi   = sqrt(int2d(Th)(gradphi^2));
+
+        cout << "          Grad comparison: " << Gtheta << " " << Gphi << endl;
+
+
+        theta = thetaold - pas*gradtheta;
+
+        proj(theta,volume0/Th.area,Vh0);
+
+        ang = angold-pas*gradphi;
+
+        // Solve the conductivity equation
+        heat;
+
+        //Compute the objective function
+        objectif=int1d(Th,GammaN)(u*u);
+        if(iter>npen){// modify objective when using penalization
+          objectif=int1d(Th,GammaN)(u*u)+Cpen*int2d(Th)(theta*(1-theta));
+        }
+        vals[iter-1] = objectif;
+
+        if (objectif > objectifold*1.001 && accept== 0)
+        {
+        // if we do not descent we refuse the step
+          pas = pas / 2. ;
+          cout << "==========REJECT: new step=" << pas << endl ;
+          u = uold;
+          p = pold;
+          cout<<  "==========Cost: "<<objectif<<" Old cost: " << objectifold << "  Volume: "<<volume<<endl;
+          objectif = objectifold ;
+          theta = thetaold;
+          ang   = angold;
+          //dPhi;
+          //dTheta;
+        }
+        else
+        {
+        // on accepte le pas
+          pas = pas * 1.1 ;
+          cout << "          New step=" << pas << endl ;
+
+          cout << "    Objective: " << objectif   << endl ;
+           cout<< "    Volume: "<<volume<<endl;
+           legende="Iteration "+iter+", Cost "+objectif+", Volume="+volume;
+           Vh thetb = 1-theta;
+           thetaold = theta;
+           angold   = ang;
+           pold = p;
+           uold = u;
+           thetav = thetb;
+           plot(thetb,fill=1,value=1,viso=vviso,cmm="Plot of the density: theta",wait=0,WindowIndex=0);
+           plot(ang,fill=1,value=1,cmm="Plot of the angle: phi",wait=0,WindowIndex=1);
+
+          // Compute the gradient using the adjoint method //
+          adjoint ;
+          //p = -u;
+
+          dPhi;
+          dTheta;
+};
+
+volume = int2d(Th)(theta);
+
+
+
+cout << volume << " " << volume0 << endl;
+cout << "Min theta=" << theta[].min << " Max theta=" << theta[].max << endl;
+
+};
+
+// End of loop. Show the result  //
+
+//Show the final shape
+legende="Final shape, Iteration "+iter+", Cost "+objectif+", Volume="+volume;
+Vh thetb = 1-theta;
+plot(Th,thetb,fill=1,value=0,cmm=legende);
+
+//vals[vals.n] = vals[vals.n-1];
+
+// Show convergence curve
+real[int] dis = 1:niter;
+plot([dis,vals],cmm="Evolution of the objective function");
+
+// If the plot is not shown correctly in the window type + to fix the view
+// With P and Enter you can go to previous and next plots

@@ -1,0 +1,47 @@
+//Ex4
+//*************************
+real R=2,r=1;
+int Nc = 10;
+//The big circle boundary
+border C1(t=0,2*pi){
+   x = R*cos(t);
+   y = R*sin(t);
+   label = 0;  //大圆是0
+}
+//The little one
+border C2(t=0,2*pi){
+   x = r*cos(t);
+   y = r*sin(t);
+   label = 1;
+}
+
+mesh Ring = buildmesh(C1(2*pi*R*Nc)+C2(-2*pi*r*Nc));
+plot(Ring,wait=1,cmm="Mesh of a Ring");
+
+fespace Vh(Ring,P1);  // define the FE space
+Vh u,v;             // define some FE functions
+
+varf bf(u,v) =
+    int2d(Ring)((dx(u)*dx(v)+dy(u)*dy(v)))
+    +on(0,u=0);
+varf Vec(u,v)=int1d(Ring,1)(v);
+real[int]k=Vec(0,Vh);
+
+matrix LHM=k*k';
+matrix A=bf(Vh,Vh);
+//left hand side matrix
+matrix M=LHM+A;
+
+set(M,solver=sparsesolver);
+//********************************
+//The function f can be modified
+Vh f=x^2+y^2;
+//*******************************
+
+varf Lf(u,v) =
+    int2d(Ring)(f*v);
+//right hand side vector
+real[int] RHS=Lf(0,Vh);
+u[]=M^-1*RHS;
+plot(u,cmm="Solution of the problem",wait=1);
+//**************The End**************************

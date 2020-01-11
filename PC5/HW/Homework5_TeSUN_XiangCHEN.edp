@@ -1,0 +1,165 @@
+//Homework 5
+//Author: Te SUN & Xiang CHEN
+
+real TOL = 1e-6;
+
+real hmin = 0.1;
+real hmax = 1;
+real h0   = 0.5;
+
+real alpha = 1;
+
+int maxiter = 20;
+int iter;
+verbosity = 0;
+
+real lag,lagmin,lagmax;
+real vol0=h0,vol;
+
+int NN = 50;
+
+real E=2;			// Young modulus
+real nu=0.3;	// Poisson coefficient (between -1 and 1/2)
+
+real lambda=E*nu/((1.+nu)*(1.-2.*nu));
+real mu=E/(2.*(1.+nu));
+
+
+int GammaD = 0,GammaN1 = 1,GammaN2=2,Gamma = 100;
+
+border left(t=1,0){x=0;y=t;label=GammaD;}
+border bot(t=0,1){x=t;y=0;label=Gamma;}
+
+// 5 parts for the right side
+border r1(t=0,0.1){x=1;y=t;label=GammaN2;}
+border r2(t=0.1,0.4){x=1;y=t;label=Gamma;}
+border r3(t=0.4,0.6){x=1;y=t;label=GammaN1;}
+border r4(t=0.6,0.9){x=1;y=t;label=Gamma;}
+border r5(t=0.9,1){x=1;y=t;label=GammaN2;}
+
+border top(t=1,0){y=1;x=t;label=Gamma;}
+
+
+mesh Th = buildmesh(left(NN)+bot(NN)+r1(0.1*NN)+
+      r2(0.3*NN)+r3(0.2*NN)+r4(0.3*NN)+r5(0.1*NN)+top(1*NN));
+plot(Th,wait=2);
+
+fespace Vh0(Th,P0);
+fespace Vh2(Th,[P2,P2]);
+
+Vh2 [u1,v1],[u2,v2],[w,s];
+Vh0 h,hold,density,newh;
+Vh0 Aeueu;
+
+Vh2 [g1x,g1y],[g2x,g2y];
+/////////////////////////////////////////////
+//1.If we set one of g1 g2 to zero, we come back to the single load case
+//2.If we change the magnitude of g1,g2, it is equivalent to add a penalisation term
+//    In the case where ||g1||>>||g2||, we put more emphasis
+//    to minimize the displacement when applying a load like g1, vice versa.
+//
+////////////////////
+[g1x,g1y] = [0, -1];
+[g2x,g2y] = [1, 0];
+
+
+h = 1+0.1*x^2;
+real avg = 1/Th.area*int2d(Th)(h);
+////////////////////
+// Initialization //
+////////////////////
+h = h-avg+h0;
+
+real sqrt2 = sqrt(2);
+
+macro e(u,v) [dx(u),dy(v),(dx(v)+dy(u))/sqrt2]//
+macro div(u,v) (dx(u)+dy(v))//
+
+// we seperate multi-load into 2 different problem with the same geometric
+problem elasticity1([u1,v1],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u1,v1)'*e(w,s)
+             +h*lambda*div(u1,v1)*div(w,s))
+    -int1d(Th,GammaN1)(g1x*w+g1y*s)
+    +on(GammaD,u1=0,v1=0);
+
+elasticity1;
+
+
+
+problem elasticity2([u2,v2],[w,s]) =
+    int2d(Th)(2.*mu*h*e(u2,v2)'*e(w,s)
+             +h*lambda*div(u2,v2)*div(w,s))
+    -int1d(Th,GammaN2)(g2x*w+g2y*s)
+    +on(GammaD,u2=0,v2=0);
+
+elasticity2;
+//plot([u1,v1]);
+//plot([u2,v2]);
+
+// we calculate the sum of the compliance
+real compliance = int1d(Th,GammaN1)(g1x*u1+g1y*v1)+int1d(Th,GammaN2)(g2x*u2+g2y*v2);
+
+cout << "Compliance: " << compliance << endl;
+
+// Macro for truncation
+macro trunc(u,mm,MM) min(max(u,mm),MM)// END of macro
+
+real[int] vals(maxiter);
+vals[0]=compliance;
+
+for(iter=1;iter<maxiter;iter++){
+  //also we calculate the sum
+  Aeueu = h^2*(2*mu*e(u1,v1)'*e(u1,v1)+lambda*div(u1,v1)*div(u1,v1));
+  Aeueu = Aeueu+h^2*(2*mu*e(u2,v2)'*e(u2,v2)+lambda*div(u2,v2)*div(u2,v2));
+  // upper bound lagmax
+  lagmax = Aeueu[].max/hmin^2;
+  newh = trunc(sqrt(1/lagmax*Aeueu),hmin,hmax);
+  cout <<"Lagmax: " << lagmax << "  Min: " << newh[].min << "   Max: " << newh[].max << endl;
+
+  // lower bound lagmin
+  lagmin = Aeueu[].min/hmax^2;
+  newh = trunc(sqrt(1/lagmin*Aeueu),hmin,hmax);
+
+  cout <<"Lagmin: " << lagmin << " Min: " << newh[].min << "   Max: " << newh[].max << endl;
+  // dichotomy search, since the function h(l) is a function that decreases
+  while(abs(lagmax-lagmin)>TOL || abs(vol-vol0)>TOL){
+     lag = 0.5*(lagmax+lagmin);   // look at midpoint
+     newh =  trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+     vol = 1/Th.area*int2d(Th)(newh);
+     if(vol<vol0){
+        lagmax = lag;
+     }
+     else{
+        lagmin = lag;
+     }
+  }
+  hold = h;
+  h =  trunc(sqrt(1/lag*Aeueu),hmin,hmax);
+  vol = 1/Th.area*int2d(Th)(h);
+
+  elasticity1;
+  elasticity2;
+  compliance = int1d(Th,GammaN1)(g1x*u1+g1y*v1)+int1d(Th,GammaN2)(g2x*u2+g2y*v2);
+  vals[iter] = compliance;
+
+  cout << "Iteration #" << iter << " | Compliance " << compliance << "   Vol frac. " << vol << endl;
+
+  plot(h,fill=1,value=1,wait=0);
+
+  // stopping criterion
+  Vh0 diff = abs(h-hold);
+  if(diff[].max<TOL){break;}
+
+}
+Vh2 [u,v]=[u1+u2,v1+v2];
+//////////////////////////////////
+// Plot of the mesh deformation //
+//////////////////////////////////
+real coef=0.1;
+mesh Dh = movemesh (Th,[x+u*coef,y+v*coef]);
+plot(Dh,wait=1,cmm="Deformation");
+//////////////////////////////////
+// Plot of the objectif Evolution//
+//////////////////////////////////
+real[int] dis = 1:vals.n;
+plot([dis,vals],cmm="Evoluion of cost function");

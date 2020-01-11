@@ -1,0 +1,256 @@
+//Homework 8 Exercise 2
+//Author: Te SUN & Xiang CHEN
+
+//Question 2.2
+load "lapack"
+load "fflapack" //in order to calculate the inverse of matrix
+
+real alpha=1.;
+real beta=10.;
+
+// Coefficients of the homogenized tensor A*
+real A11, A12, A21, A22 ;
+string legende ;
+
+////////////////////////////////
+// Definition of the domain   //
+////////////////////////////////
+mesh Sh;
+
+real pi=4*atan(1) ;
+real theta1=0.8;
+real theta2=0.4;
+real theta=theta1*theta2;
+real m1=(1-theta1)/(1-theta);
+real m2=theta1*(1-theta2)/(1-theta1*theta2);
+
+//  Top boundary
+border a1(t=1,0) { x=t; y=1;label=1; };
+// Left boundary
+border a2(t=1,0)  { x=0; y=t;label=2; };
+// Bottom boundary
+border a3(t=0,1) { x=t; y=0;label=3; };
+// Right boundary
+border a4(t=0,1) { x=1; y=t;label=4; };
+
+// Boundaries for material A
+real L=1/(4-theta1);
+real h=theta2;
+real hmin=0.001;
+
+//Rectangle 1 for material A
+//  Top boundary1
+border B1(t=L,L*(1-theta1)) { x=t; y=h;label=5; };
+// Left boundary1
+border B2(t=h,hmin)  { x=L*(1-theta1); y=t;label=5; };
+// Bottom boundary1
+border B3(t=L*(1-theta1),L) { x=t; y=hmin;label=5; };
+// Right boundary1
+border B4(t=hmin,h) { x=L; y=t;label=5; };
+
+//Rectangle 2 for material A
+//  Top boundary1
+border B5(t=L,L*(1-theta1)) { x=t+L; y=h;label=5; };
+// Left boundary1
+border B6(t=h,hmin)  { x=L*(1-theta1)+L; y=t;label=5; };
+// Bottom boundary1
+border B7(t=L*(1-theta1),L) { x=t+L; y=hmin;label=5; };
+// Right boundary1
+border B8(t=hmin,h) { x=L+L; y=t;label=5; };
+
+//Rectangle 3 for material A
+//  Top boundary1
+border B9(t=L,L*(1-theta1)) { x=t+2*L; y=h;label=5; };
+// Left boundary1
+border B10(t=h,hmin)  { x=L*(1-theta1)+2*L; y=t;label=5; };
+// Bottom boundary1
+border B11(t=L*(1-theta1),L) { x=t+2*L; y=hmin;label=5; };
+// Right boundary1
+border B12(t=hmin,h) { x=3*L; y=t;label=5; };
+
+//////////////////////////////
+// Mesh			    //
+//////////////////////////////
+int n=8 ;
+Sh= buildmesh (a1(5*n)+a2(5*n)+a3(5*n)+a4(5*n)+B1(5*n)+B2(5*n)+B3(5*n)+B4(5*n)+B5(5*n)+B6(5*n)+B7(5*n)+B8(5*n)+B9(5*n)+B10(5*n)+B11(5*n)+B12(5*n));
+//mesh Th = Sh ;
+
+plot(Sh,wait=1);
+
+// Definition of the P0 space for the coefficient
+// Furthermore we define the characteristic function
+fespace Vh0(Sh,P0);
+Vh0 Ay , reg=region;	// Region labels
+
+int C1,C2,C3,C4;
+real xx=L-theta1*L/2;
+real yy=h/2;
+C1=reg(xx,yy);
+C2=reg(xx+L,yy);
+C3=reg(xx+2*L,yy);
+C4=reg(0.5,(1-h/2));
+
+// Define FEM spaces
+
+fespace Vh1(Sh,P1,periodic=[ [1,x],[3,x],[2,y],[4,y] ]);
+
+// Solution variables: u1 and u2
+// Test function: phi
+Vh1 u1,u2,phi;
+
+////////////////////////////
+// Definition of the coefficients for each composite
+// as shown in the lecture notes
+//
+// This works since regions are labeled 0 or 1. You should check that this is the case. In more general situations make sure that in the end you have the right description in terms of the region.
+
+//Ay = alpha*(reg==12) + beta*(1.-(reg==12)) ;
+Ay = -alpha*(C2-reg)*(C3-reg)*(C4-reg)/((C1-C2)*(C1-C3)*(C1-C4)) - alpha*(C1-reg)*(C3-reg)*(C4-reg)/((C2-C1)*(C2-C3)*(C2-C4)) - alpha*(C2-reg)*(C1-reg)*(C4-reg)/((C3-C2)*(C3-C1)*(C3-C4)) - beta*(C2-reg)*(C3-reg)*(C1-reg)/((C4-C2)*(C4-C3)*(C4-C1)) ;
+plot(Sh,Ay,fill=1,wait=1,value=true);
+
+// Defining the cell equations//
+
+// -div_y (A(y)(e_i + \nabla_y w_i(y))) = 0
+// y -> w_i(y) is Y-periodic
+
+macro grad(u) [dx(u),dy(u)]//
+
+problem cell1(u1,phi) =
+    int2d(Sh)(Ay*grad(u1)'*grad(phi))
+   +int2d(Sh)(Ay*dx(phi))
+;
+
+problem cell2(u2,phi) =
+    int2d(Sh)(Ay*grad(u2)'*grad(phi))
+   +int2d(Sh)(Ay*dy(phi))
+;
+
+// Solve the cell problems
+cell1;
+cell2;
+
+// Compute the entries of the homogenized tensor A*
+A11 = int2d(Sh)( Ay*([1,0]+grad(u1))'*([1,0]+grad(u1)) ) ;
+A21 = int2d(Sh)( Ay*([1,0]+grad(u1))'*([0,1]+grad(u2)) ) ;
+A12 = int2d(Sh)( Ay*([0,1]+grad(u2))'*([1,0]+grad(u1)) ) ;
+A22 = int2d(Sh)( Ay*([0,1]+grad(u2))'*([0,1]+grad(u2)) ) ;
+
+
+/////////////////////////////////////////
+// Output and visualization            //
+/////////////////////////////////////////
+cout<<"Homogenized coefficients" << endl;
+cout <<" A11 = " << A11 <<endl;
+cout <<" A12 = " << A12 <<endl;
+cout <<" A21 = " << A21 <<endl;
+cout <<" A22 = " << A22 <<endl;
+
+legende="Cell 1 problem, A11="+A11;
+plot(Sh,u1,fill=1,wait=1,value=true,cmm=legende);
+
+legende="Cell 2 problem, A22="+A22;
+plot(Sh,u2,fill=1,wait=1,value=true,cmm=legende);
+
+
+//Question 2.3
+
+// Using the formula from Lemma 7.14
+// theta*(Astar-B)^(-1)=(A-B)^(-1)+(1-theta)((m1/B)e1"X"e1+(m2/B)e2"X"e2)
+// here "X" present "produit tensorielle"
+//direct computation
+real[int, int] Astar(2, 2),A(2,2),B(2,2),inverse(2,2);
+for (int i=0;i <2; i++){
+  A(i,i)=alpha;
+  B(i,i)=beta;
+}
+
+cout<<m1<<m2<<endl;
+real[int,int] temp(2,2);
+temp(0,0)=m1/beta;
+temp(1,1)=m2/beta;
+
+temp=temp*(1-theta);
+inverse=A-B;
+inverse=(inverse)^(-1);
+Astar=( inverse +temp ) ;
+Astar=Astar/theta;
+
+Astar=Astar^-1;
+Astar=Astar+B;
+
+cout<<"Astar : "<<Astar<<endl;
+
+// We find that the results are similar.
+
+
+
+//Question 2.4
+
+//we keep theta2 inchange and give the variation of theta1 by the boucle
+
+alpha=10.;
+beta=1.;
+
+//Or inverting the value
+// alpha=1.;
+// beta=10.;
+
+// To store the values of A11 A22 with different m1
+real[int] A1s(100),A2s(100);
+real[int] ms(100);
+
+for (int i =100; i>0;i--){
+    //different value of theta1
+    theta1=i*1.0/101;
+    theta=theta1*theta2;
+    m1=(1-theta1)/(1-theta);
+    m2=theta1*(1-theta2)/(1-theta1*theta2);
+    L=1/(4-theta1);
+    h=theta2;
+    hmin=0.001;
+    Sh= buildmesh (a1(5*n)+a2(5*n)+a3(5*n)+a4(5*n)+B1(5*n)+B2(5*n)+B3(5*n)+B4(5*n)+B5(5*n)+B6(5*n)+B7(5*n)+B8(5*n)+B9(5*n)+B10(5*n)+B11(5*n)+B12(5*n));
+
+    Vh1 u1,u2,phi;
+
+
+    Vh0 Ay , reg=region;	// Region labels
+
+    xx=L-theta1*L/2;
+    yy=h/2;
+    C1=reg(xx,yy);
+    C2=reg(xx+L,yy);
+    C3=reg(xx+2*L,yy);
+    C4=reg(0.5,(1-h/2));
+
+    Ay = -alpha*(C2-reg)*(C3-reg)*(C4-reg)/((C1-C2)*(C1-C3)*(C1-C4)) - alpha*(C1-reg)*(C3-reg)*(C4-reg)/((C2-C1)*(C2-C3)*(C2-C4)) - alpha*(C2-reg)*(C1-reg)*(C4-reg)/((C3-C2)*(C3-C1)*(C3-C4)) - beta*(C2-reg)*(C3-reg)*(C1-reg)/((C4-C2)*(C4-C3)*(C4-C1)) ;
+
+    plot(Sh,Ay,fill=1,value=true);
+
+
+
+    problem cell1(u1,phi) =
+        int2d(Sh)(Ay*grad(u1)'*grad(phi))
+       +int2d(Sh)(Ay*dx(phi))
+    ;
+
+    problem cell2(u2,phi) =
+        int2d(Sh)(Ay*grad(u2)'*grad(phi))
+       +int2d(Sh)(Ay*dy(phi))
+    ;
+
+    // Solve the cell problems
+    cell1;
+    cell2;
+
+    A11 = int2d(Sh)( Ay*([1,0]+grad(u1))'*([1,0]+grad(u1)) ) ;
+    A21 = int2d(Sh)( Ay*([1,0]+grad(u1))'*([0,1]+grad(u2)) ) ;
+    A12 = int2d(Sh)( Ay*([0,1]+grad(u2))'*([1,0]+grad(u1)) ) ;
+    A22 = int2d(Sh)( Ay*([0,1]+grad(u2))'*([0,1]+grad(u2)) ) ;
+
+    ms(i-1)=m1;
+    A1s(i-1)=A11;
+    A2s(i-1)=A22;
+
+}
+plot([ms,A1s],wait=1,cmm="Evoluion of cost function m-A11");
+plot([ms,A2s],wait=1,cmm="Evoluion of cost function m-A22");

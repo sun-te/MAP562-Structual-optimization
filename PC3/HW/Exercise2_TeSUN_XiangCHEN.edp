@@ -1,0 +1,239 @@
+
+real T0 = 0.1;
+int N = 50;
+macro Pk P1 // EOM
+macro Pk0 P0 // EOM
+macro grad(u) [dx(u),dy(u)] // EOM
+real TOL = 1e-5;
+real maxstep = 1;
+verbosity = 0;
+
+int gammaD = 0;
+
+//*************************************************
+//Defination of the shape
+
+//*************************************************
+mesh Th;
+
+
+real[int] xL = 10*[0,1,1,0.5,0.5,0];
+real[int] yL = 10*[0,0,0.5,0.5,1,1];
+//  int[int] labelL = [0,1,2,3,4,5];
+int[int] labelL = [gammaD,gammaD,gammaD,gammaD,gammaD,gammaD];
+int[int] numberL = 5*[10,5,5,5,5,10];
+border Lbord(t=0,1; i){
+   int nexti = (i+1)%xL.n;
+   x = (1-t)*xL[i]+t*xL[nexti];
+   y = (1-t)*yL[i]+t*yL[nexti];
+   label = labelL[i];
+}
+Th= buildmesh(Lbord(numberL));
+
+//End of defination of Shape
+//******************************2******************
+
+
+func f = max(1-x^2-y^2,0.0);
+fespace Vh(Th,Pk);
+fespace Vh0(Th,Pk0);
+
+//----------------------------------------------
+//initialization of the position of the source
+real[int] zz = [9,4.5];
+//----------------------------------------------
+
+Vh T,phi,Adj,v;
+
+Vh fun =  f(x-zz[0],y-zz[1]);
+
+problem Temp(T,phi) =
+    int2d(Th)(grad(T)'*grad(phi))
+   -int2d(Th)(fun*phi)
+   +on(gammaD,T=0);
+//To demonstrate a initial configuration
+Temp;
+
+int Question;
+cout<<"Enter a number of Question (1 or 2)"<<endl;
+cout<<"1: Resolution by a direct directional gradient method"<<endl;
+cout<<"2: Question 2, resolution by introducing the Lagrangian: L(T,adj,z)"<<endl;
+cout<<"3: Verification by using the discret method"<<endl;
+cin>>Question;
+//***********************************
+//Question 1, resolution by a direct directional gradient method
+//The variable "zz" is going by the direction
+// -stepsize*[\partial_{x}J(zz),\partial_{y}J(zz)]
+//***********************************
+if(Question==1){
+  real[int] e(2); // the direction
+  // directional derivative of T in the direction "e"
+  problem Directv(v,phi) =
+      int2d(Th)(grad(v)'*grad(phi))
+     +int2d(Th)((dx(fun)*e[0]+dy(fun)*e[1])*phi)
+     +on(gammaD,v=0);
+  // Optimization loop
+  real normg = 1e4;
+  real stepsize = 0.1;
+  int iter = 1;
+  real oldval = 1e19;
+  real[int] oldz = zz;
+  real[int] Dz(2);
+  real Jz;
+
+  while(normg>TOL&&stepsize>1e-5){
+    fun = f(x-zz[0],y-zz[1]);
+    Temp;  // Find the temperature
+
+
+    // compute directional derivatives corresponding to
+    // partial derivatives
+    //The derivative of J for z
+    // \Nabla J in the direction [1,0] for --- x direction
+    // \partial_{x} J
+    e=[1,0];
+    //e=[1,0.2];
+    Directv;
+    Dz[0] = int2d(Th)(2*(T-T0)*v);
+    // \Nabla J in the direction [1,0] for --- y direction
+    // \partial_{y} J
+    e=[0,1];
+    //e=[-0.2,1];
+    Directv;
+    Dz[1] = int2d(Th)(2*(T-T0)*v);
+    //********************************************************
+    //**********************Remark****************************
+    //As long as e1 and e2 is not co-linear, the direction is acceptable
+    //Consequently, the result can be influenced by the choice of e1 and e2
+    //We have tried another choice of e1,e2=[1,0.2],[-0.2,1]
+    //The result is improved
+    //*******************EndOfRemark**************************
+
+
+    //update zz
+    zz = zz - stepsize*Dz; // advance in the direction of the gradient
+    normg = sqrt(Dz[0]^2+Dz[1]^2); // compute norm, to find out whehter "zz" needs to move a lot
+
+
+    Jz = int2d(Th)((T-T0)^2);  // Compute objective function
+    // decide if we accept the iteration or not
+    // modify stepsize accordingly
+    if(Jz<oldval*1.0001){ //if Jz is decreasing, we accept the old stepsize,
+       oldval = Jz;
+       //we try to enlarge the time step to desent more quickly
+       stepsize = min(stepsize*2,maxstep);
+       oldz = zz;
+    }
+    else{ //else the step is too large
+       zz = oldz;
+       stepsize = stepsize*0.5;
+    }
+    cout << "Iteration " << iter << " | Value of J(z): " << Jz << " |Norm gradient: " << normg << " Step: " << stepsize << endl;
+
+    plot(fun,cmm="Iteration "+iter,fill=1);
+
+    iter++;
+  }
+}
+//***********************************
+//Question 2, resolution by introducing the lagrangian
+//L(T,adj,z) = int2d(Th)((T-T0)^2) + int2d(Th)(grad(T)'*grad(adj) -ind2d(Th)(fun *adj))
+//***********************************
+else if(Question==2){
+  //The adjoint function is the solution for
+  // \partial_{T} L(T,adj,z) = 0, which gives us:
+  problem Adjoint(Adj,phi) =
+      int2d(Th)(grad(Adj)'*grad(phi))
+     +int2d(Th)(2*(T-T0)*phi)
+     +on(gammaD,Adj=0);
+
+  Adjoint;
+  real[int] Dz(2);
+  real Jz;
+
+
+  // Optimization loop
+  real normg = 1e4;
+  real stepsize = 0.001;
+  int iter = 1;
+  real oldval = 1e19;
+  real[int] oldz = zz;
+
+
+  while(normg>TOL && stepsize>1e-5){
+
+     fun = f(x-zz[0],y-zz[1]);
+     //find T_new (z_old)
+     Temp;
+     Jz = int2d(Th)((T-T0)^2);
+     Adjoint;
+     Vh0 gradf;
+     gradf = dx(fun);
+     Dz[0] = int2d(Th)(gradf*Adj);
+     gradf = dy(fun);
+     Dz[1] = int2d(Th)(gradf*Adj);
+
+     zz = zz - stepsize*Dz;
+
+     normg = sqrt(Dz[0]^2+Dz[1]^2);
+
+     if(Jz<oldval*1.0001){
+        oldval = Jz;
+        stepsize = min(stepsize*2,maxstep);
+        oldz = zz;
+     }
+     else{
+        zz = oldz;
+        stepsize = stepsize/2;
+     }
+     cout << "Iteration " << iter << " | Value of J(z): " << Jz << " | Norm gradient: " << normg << " Step: " << stepsize << endl;
+     plot(fun,cmm="Iteration "+iter,fill=1);
+     iter++;
+
+  }
+}
+else{
+  int[int] numberL = 3*[10,5,5,5,5,10];
+  border Lbord(t=0,1; i){
+     int nexti = (i+1)%xL.n;
+     x = (1-t)*xL[i]+t*xL[nexti];
+     y = (1-t)*yL[i]+t*yL[nexti];
+     label = labelL[i];
+  }
+  Th= buildmesh(Lbord(numberL));
+
+  Vh fun;
+  macro fz(zz) {
+   fun = f(x-zz[0],y-zz[1]);
+  } // EOM
+
+  fz(zz)
+
+  macro grad(u) [dx(u),dy(u)] // EOM
+  problem Temp(T,phi,solver=CG) =
+      int2d(Th)(grad(T)'*grad(phi))
+     -int2d(Th)(fun*phi)
+     +on(gammaD,T=0);
+
+  Temp;
+
+  macro Jz int2d(Th)((T-T0)^2)//
+
+  // Compute the values of the functional on a grid
+  // to see where are the local minima
+
+  real Dx = 1,Dy=1;
+  Vh graph=0;
+
+  for(int i=0;i<Th.nv;i++){
+     cout << "Iteration " << i << " out of " << Th.nv << endl;
+     zz = [Th(i).x,Th(i).y];
+     fz(zz);
+     Temp;
+     graph[][i] = Jz;
+  }
+
+  plot(graph,wait=1,fill=1,cmm="2D view of the function");
+  Vh0 ngrad = sqrt(dx(graph)^2+dy(graph)^2);
+  plot(ngrad,fill=1,cmm="2D view of the gradient");
+}

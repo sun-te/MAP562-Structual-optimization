@@ -1,0 +1,168 @@
+//EX5
+//3: For fixed time step, 4:For newton gradient second order
+int Question;
+cout<<"Enter an integer for question 3,4 or 5: "<<endl;
+cout<<"3: For fixed time step"<<endl;
+cout<<"4: For newton gradient second order"<<endl;
+cout<<"5: For fixed point method"<<endl;
+cin>>Question;
+//int Question=3;
+//int Question=4;
+//int Question=5;
+//**********************************************
+//Q1.write the variational formulation
+// int2d(Th)(dx(u)*dx(v)+dy(u)*dy(v))
+// +int1d(Th,GammaN)(k*abs(u)^3*u*v)
+// -int2d(f*v)+on(GammaD,u=0);
+//**********************************************
+//Q2.Verifiy that the derivative of J is the FV
+//2.1
+//since k*abs(u)^4 *sign(u) *v =k*abs(u)^3*u*v, therefore the result is verified
+//2.2
+//J''(u)(v,v)=int2d(Th)(dx(v)*dx(v)+dy(v)*dy(v))
+//            +int1d(Th,GammaN)(4*k*abs(u)^3*v^2)
+//is strictly positive =>strict convexity
+//The minimiser verifies J'(u)=0 <=>FV;
+//*********************************************
+//Q3 Gradient problem
+int N=50;// Nb of edges on the boundary
+// Define volume conductivity
+
+real k=1e-4; //coefficient for radiation
+macro vh() P1//
+mesh Th;
+int GammaN,GammaD;
+{
+	GammaN=1;GammaD=2;
+	int[int] labels=[GammaN,GammaD,GammaD,GammaN];
+	Th=square(N,N,label=labels);
+}
+
+fespace Vh(Th,vh);
+Vh du,phi,u;
+//function source
+Vh f=(x^2+y^2-x+y)*((x^2+y^2)<8);
+//Vh f=1;
+
+
+//initialization
+u = 0;
+
+
+macro grad(u) [dx(u),dy(u)] //
+macro J(u) int2d(Th)(grad(u)'*grad(u)/2.)
+         - int2d(Th)(f*u)
+	       + int1d(Th,GammaN)(k/5. *abs(u)^5);
+
+// Solution loop
+real funcnorm = 1000;
+
+// Counter of the number of gradient steps
+int i=0;
+real lowertolerance =1.e-7;
+//To restrict the loop within 1000 times
+int itermax=1000;
+
+//***********************************
+//Fixed time steps for question 3
+//***********************************
+if(Question==3)
+{
+  //Change the du into the appropriate space
+  //We take the norm in H1
+  problem dJ(du,phi) =-int2d(Th)(grad(du)'*grad(phi)+du*phi) //norm H1
+          //The dJ in L2 space
+         +int2d(Th)(grad(u)'*grad(phi))
+         -int2d(Th)(f*phi)
+         +int1d(Th,GammaN)(k*abs(u)^3*u*phi)
+         +on(GammaD,du=0);
+
+	//fixed gradient descent step
+  real stepsize = 0.1;
+
+  while(funcnorm > lowertolerance && i<itermax)
+  {
+    dJ;
+
+    u = u - stepsize * du;
+
+    funcnorm = sqrt(int2d(Th)(du*du));
+
+    real residual = J(u);
+
+    cout<<"#"<<i<<" J="<<residual << "  " << funcnorm<<endl;
+
+  	plot(u,cmm="#"+i+" J="+residual,wait=0,fill=1);
+    i++;
+  }
+}
+//***********************************
+//Newton second order for question 4
+//***********************************
+else if (Question==4)
+{
+	//find the best du
+	problem dJ(du,phi) =int2d(Th)(grad(du)'*grad(phi))
+				 +int1d(Th,GammaN)(4*k*abs(u)^3*du*phi)
+	       +int2d(Th)(grad(u)'*grad(phi))
+	       -int2d(Th)(f*phi)
+	       +int1d(Th,GammaN)(k*abs(u)^3*u*phi)
+	       +on(GammaD,du=0);
+
+	while(funcnorm > lowertolerance && i<itermax)
+	{
+	  dJ;
+
+	  u = u + du;
+
+	  funcnorm = sqrt(int2d(Th)(du*du));
+
+	  real residual = J(u);
+
+	  cout<<"#"<<i<<" J="<<residual << "  " << funcnorm<<endl;
+
+	  plot(u,cmm="#"+i+" J="+residual,wait=0,fill=1);
+	  i++;
+	}
+}
+//***********************************
+//Fixed point for Question 5
+//***********************************
+else if (Question==5)
+{
+	real alpha =-1;
+	real eps = 1e-9;
+	Vh uold=u;
+	problem fixedp(u,phi) =
+				 int1d(Th,GammaN)(k*(1-alpha)*abs(uold+eps)^3*u*phi)
+				 +int1d(Th,GammaN)(k*alpha*abs(uold)^3*u*phi)
+				 +int2d(Th)(grad(u)'*grad(phi))
+				 -int2d(Th)(f*phi)
+				 +on(GammaD,u=0);
+	Vh error;
+	real err=1000000;
+	while(err > lowertolerance && i<itermax)
+	{
+
+	  fixedp;
+		error = abs(u-uold);
+		uold = u;
+		err = error[].linfty;
+		real residual = J(u);
+
+	  cout<<"#"<<i<<" Error:  " << error[].linfty <<" J="<<residual << "  "<< endl;
+
+	  plot(u,cmm="#"+i,wait=0,fill=1);
+	  i++;
+	}
+}
+cout<<"umax="<<u[].max<<endl;
+cout<<"umin="<<u[].min<<endl;
+//*********************************************
+//Comparaision
+//1.fixed point method converge generally faster than gradient method
+//2.They all solve a linear problem for each iteration stated above.
+//*********************************************
+
+
+//************The End*************************
